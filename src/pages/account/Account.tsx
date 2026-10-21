@@ -752,7 +752,7 @@ function Support() {
 
 function Settings() {
   const { user, refresh, signOut } = useAuth();
-  const profile = useApi<{ name: string; phone: string | null; email: string; preferences: Record<string, any> }>("/account/profile");
+  const profile = useApi<{ name: string; phone: string | null; email: string; preferences: Record<string, any>; hasPassword: boolean; googleLinked: boolean }>("/account/profile");
   const sessions = useApi<{ sessions: { id: string; current: boolean; lastSeenAt: string; ip: string; userAgent: string }[] }>("/auth/sessions");
   const { motion, setMotion } = useTheme();
   const toast = useToast();
@@ -809,10 +809,26 @@ function Settings() {
         }}
       >
         <h2 className="h3">Password</h2>
-        <PasswordField label="Current password" autoComplete="current-password" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} />
-        <PasswordField label="New password" autoComplete="new-password" showStrength value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} />
-        {pwErr && <div className="alert alert-danger">{pwErr}</div>}
-        <Button type="submit">Change password</Button>
+        {profile.data.googleLinked && <p className="small muted">Your account is linked to Google sign-in.</p>}
+        {profile.data.hasPassword ? (
+          <>
+            <PasswordField label="Current password" autoComplete="current-password" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} />
+            <PasswordField label="New password" autoComplete="new-password" showStrength value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} />
+            {pwErr && <div className="alert alert-danger">{pwErr}</div>}
+            <Button type="submit">Change password</Button>
+          </>
+        ) : (
+          <>
+            <p className="small">You sign in with Google and haven't set a password. We can email you a link to add one.</p>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => api.post("/auth/forgot-password", { email: profile.data!.email }).then(() => toast("Check your email for a link to set a password.", "success"))}
+            >
+              Email me a link
+            </button>
+          </>
+        )}
       </form>
 
       <section className="card stack">
@@ -885,8 +901,8 @@ function Settings() {
               }
             }}
           >
-            <p className="small">This can't be undone. Enter your password to confirm.</p>
-            <PasswordField label="Password" autoComplete="current-password" value={delPw} onChange={(e) => setDelPw(e.target.value)} />
+            <p className="small">This can't be undone.{profile.data.hasPassword ? " Enter your password to confirm." : ""}</p>
+            {profile.data.hasPassword && <PasswordField label="Password" autoComplete="current-password" value={delPw} onChange={(e) => setDelPw(e.target.value)} />}
             {delErr && <div className="alert alert-danger">{delErr}</div>}
             <div className="row" style={{ justifyContent: "flex-end" }}>
               <button type="button" className="btn btn-ghost" onClick={() => setDel(false)}>

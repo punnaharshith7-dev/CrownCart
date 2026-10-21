@@ -17,6 +17,7 @@ import { adminRoutes } from "./routes/admin.ts";
 import { deliveryRoutes } from "./routes/delivery.ts";
 import { supportRoutes } from "./routes/support.ts";
 import { seoRoutes } from "./routes/seo.ts";
+import { googleRoutes } from "./routes/google.ts";
 
 const SAFE = new Set(["GET", "HEAD", "OPTIONS"]);
 const LAN = /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/;
@@ -96,6 +97,7 @@ export function createApp(db: Db) {
     return c.json({ ok: dbOk, db: dbOk, integrations: integrations(), time: new Date().toISOString() }, dbOk ? 200 : 503);
   });
 
+  app.route("/api/auth/google", googleRoutes);
   app.route("/api/auth", authRoutes);
   app.route("/api/catalog", catalogRoutes);
   app.route("/api/cart", cartRoutes);

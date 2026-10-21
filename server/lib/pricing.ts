@@ -60,8 +60,12 @@ export function loadCartLines(db: Db, userId: number): CartLine[] {
             p.id AS product_id, p.slug, p.name AS product_name, p.status AS product_status,
             s.id AS store_id, s.name AS store_name, s.status AS store_status,
             COALESCE(i.on_hand - i.reserved, 0) AS available,
-            (SELECT url FROM product_media m WHERE m.product_id = p.id AND m.kind IN ('image','hero')
-              ORDER BY (m.variant_id = v.id) DESC, m.kind = 'image' DESC, m.sort_order LIMIT 1) AS image
+            -- A variant-specific image wins; otherwise the product's first image. (SQLite can't
+            -- reference the outer row inside a subquery's ORDER BY, hence two lookups.)
+            COALESCE(
+              (SELECT url FROM product_media m WHERE m.variant_id = v.id AND m.kind = 'image' ORDER BY m.sort_order LIMIT 1),
+              (SELECT url FROM product_media m WHERE m.product_id = p.id AND m.kind IN ('image','hero') ORDER BY m.kind = 'image' DESC, m.sort_order LIMIT 1)
+            ) AS image
        FROM cart_items ci
        JOIN product_variants v ON v.id = ci.variant_id
        JOIN products p ON p.id = v.product_id

@@ -224,7 +224,7 @@ export const wishlistRoutes = new Hono<AppEnv>()
 export const accountRoutes = new Hono<AppEnv>()
   .get("/profile", (c) => {
     const u = requireUser(c);
-    const row = c.get("db").get("SELECT email, name, phone, email_verified_at, preferences, created_at FROM users WHERE id = ?", [u.id])!;
+    const row = c.get("db").get("SELECT email, name, phone, email_verified_at, preferences, created_at, password_hash IS NOT NULL AS has_password, google_sub IS NOT NULL AS google FROM users WHERE id = ?", [u.id])!;
     return c.json({
       email: row.email,
       name: row.name,
@@ -232,6 +232,8 @@ export const accountRoutes = new Hono<AppEnv>()
       emailVerified: Boolean(row.email_verified_at),
       preferences: JSON.parse(row.preferences),
       memberSince: row.created_at,
+      hasPassword: Boolean(row.has_password),
+      googleLinked: Boolean(row.google),
     });
   })
 
@@ -379,10 +381,11 @@ export const accountRoutes = new Hono<AppEnv>()
    */
   .post("/delete", async (c) => {
     const u = requireUser(c);
-    const { password } = await body(c, z.object({ password: z.string().min(1).max(200) }));
+    const { password } = await body(c, z.object({ password: z.string().max(200).default("") }));
     const db = c.get("db");
     const row = db.get("SELECT password_hash FROM users WHERE id = ?", [u.id]);
-    if (!(await verifyPassword(password, row?.password_hash))) throw badRequest("Incorrect password.", { fields: { password: "Incorrect password." } });
+    // Accounts created with Google have no password; the active session is the proof for those.
+    if (row?.password_hash && !(await verifyPassword(password, row.password_hash))) throw badRequest("Incorrect password.", { fields: { password: "Incorrect password." } });
     const open = db.get<{ n: number }>(
       "SELECT COUNT(*) n FROM orders WHERE user_id = ? AND status IN ('confirmed','processing','ready_for_dispatch','shipped','out_for_delivery','cancellation_requested','return_requested')",
       [u.id],

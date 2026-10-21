@@ -21,6 +21,7 @@ interface MeResponse {
   cartCount: number;
   unreadNotifications: number;
   preferences: Record<string, any> | null;
+  integrations?: { google: boolean };
 }
 
 interface PendingAdd {
@@ -37,6 +38,7 @@ interface AuthState {
   cartCount: number;
   unread: number;
   preferences: Record<string, any> | null;
+  googleEnabled: boolean;
   refresh: () => Promise<void>;
   setCartCount: (n: number) => void;
   signIn: (email: string, password: string) => Promise<Me>;
@@ -128,6 +130,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [doAdd, toast]);
 
+  // Redirect-based sign-in (Google) lands back on the site already signed in:
+  // finish any add-to-bag that started the trip.
+  useEffect(() => {
+    if (state.user) replayPending();
+  }, [state.user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const signIn = useCallback(
     async (email: string, password: string) => {
       const r = await api.post<{ user: Me }>("/auth/login", { email, password });
@@ -189,6 +197,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         cartCount: state.cartCount,
         unread: state.unreadNotifications,
         preferences: state.preferences,
+        googleEnabled: Boolean(state.integrations?.google),
         refresh,
         setCartCount: (n) => setState((s) => ({ ...s, cartCount: n })),
         signIn,

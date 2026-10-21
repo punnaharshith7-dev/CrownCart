@@ -52,6 +52,24 @@ function FormError({ error }: { error: string | null }) {
   ) : null;
 }
 
+function GoogleButton({ returnTo }: { returnTo: string }) {
+  const { googleEnabled } = useAuth();
+  if (!googleEnabled) return null;
+  return (
+    <>
+      <a className="btn btn-outline btn-lg btn-block" href={`/api/auth/google/start?returnTo=${encodeURIComponent(returnTo || "/")}`}>
+        <span aria-hidden="true" style={{ fontWeight: 800 }}>
+          G
+        </span>{" "}
+        Continue with Google
+      </a>
+      <div className="row tiny muted" style={{ justifyContent: "center" }}>
+        <span>or use your email</span>
+      </div>
+    </>
+  );
+}
+
 function SignIn() {
   const [params] = useSearchParams();
   const returnTo = safeReturnTo(params.get("returnTo"), "");
@@ -61,7 +79,7 @@ function SignIn() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(params.get("error"));
   const [fields, setFields] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -86,6 +104,7 @@ function SignIn() {
   const qs = params.toString() ? `?${params.toString()}` : "";
   return (
     <Shell title="Sign in" subtitle={fromCart ? "Sign in or create an account to add this item to your bag. We'll add it as soon as you're in." : "Welcome back to CrownCart."}>
+      <GoogleButton returnTo={returnTo} />
       <form className="stack" onSubmit={submit} noValidate>
         <FormError error={error} />
         <TextField label="Email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} error={fields.email} />
@@ -141,6 +160,7 @@ function Register() {
   const qs = params.toString() ? `?${params.toString()}` : "";
   return (
     <Shell title="Create your account" subtitle="Save your bag across devices, track orders and check out faster.">
+      <GoogleButton returnTo={returnTo} />
       <form className="stack" onSubmit={submit} noValidate>
         <FormError error={error} />
         <TextField label="Full name" autoComplete="name" required value={form.name} onChange={set("name")} error={fields.name} />

@@ -54,7 +54,9 @@ With no email provider set, emails are printed in the API console and listed at 
 | Product page: gallery, zoom, variants, stock, delivery check, reviews, related, JSON-LD | Built |
 | Persistent bag, save for later, wishlist moves, coupons, server-calculated totals | Built |
 | Checkout: addresses, serviceability, COD, idempotent order placement, stock reservation | Built |
-| Razorpay online payments: order creation, signature + amount verification, webhooks, refunds | Built — **blocked: needs keys** |
+| Razorpay online payments: order creation, signature + amount verification, webhooks, refunds | Built — needs keys (docs/INTEGRATIONS.md) |
+| Google sign-in (OAuth code flow + PKCE, account linking by verified email) | Built — needs keys (docs/INTEGRATIONS.md) |
+| Transactional email via Resend | Built — needs keys (docs/INTEGRATIONS.md) |
 | Customer account: orders, tracking timeline, cancel, return/exchange, invoices, wishlist, addresses, notifications, support, settings, sessions, delete account | Built |
 | Store portal: dashboard, orders and fulfilment, returns, inventory with movement log, coupons, team invites | Built |
 | Detailed product editing: full variant editor, media alt text / ordering / per-variant images / type, change history, duplicate, bulk CSV price & stock update with preview | Built |
@@ -68,8 +70,7 @@ With no email provider set, emails are printed in the API console and listed at 
 ## Set aside until the owner returns
 
 - Logo/favicon upload and editable email templates (brand settings cover text only).
-- Integrations needing credentials: Google sign-in (env vars reserved, not wired), live Razorpay,
-  real email (Resend supported via `EMAIL_PROVIDER=resend`), SMS/WhatsApp, courier APIs.
+- SMS/WhatsApp notifications and courier APIs.
 - Testing and bug fixing (unit, integration, end-to-end, security, accessibility).
 - Advanced features: AI assistant, AR/3D product viewers, exploded views, loyalty, gift cards,
   referrals, multiple named wishlists.
