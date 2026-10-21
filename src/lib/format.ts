@@ -21,7 +21,7 @@ export const relative = (iso: string) => {
   return date(iso);
 };
 
-export const titleCase = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+export const titleCase = (s: string) => s.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 /** Only same-site paths are allowed as post-login destinations. */
 export function safeReturnTo(raw: string | null | undefined, fallback = "/") {

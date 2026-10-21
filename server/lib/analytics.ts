@@ -91,6 +91,77 @@ export function salesMetrics(db: Db, scope: string, params: (string | number)[],
   };
 }
 
+export const REPORT_DEFINITIONS = {
+  categories: "Item revenue (before order-level discounts) by product category, counted orders only.",
+  paymentMix: "Counted orders split by payment method.",
+  statusBreakdown: "All orders placed in the period by their current status.",
+  fulfilment: "Average hours from order placed to ready-for-dispatch, shipped and delivered, for orders that reached each step.",
+  delivery: "Closed delivery assignments in the period: delivered vs failed or returned to sender.",
+  returnReasons: "Return and exchange requests created in the period, by reason.",
+};
+
+/** Breakdown reports for the Reports pages. Same scope/range conventions as salesMetrics. */
+export function reportData(db: Db, scope: string, params: (string | number)[], r: Range) {
+  const inRange = "COALESCE(o.placed_at, o.created_at) BETWEEN ? AND ?";
+  const base = [...params, r.from, r.to];
+  const categories = db.all(
+    `SELECT COALESCE(c.name, 'Uncategorised') AS label, SUM(oi.line_total_paise) AS value, SUM(oi.quantity) AS units
+       FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN products p ON p.id = oi.product_id LEFT JOIN categories c ON c.id = p.category_id
+      WHERE ${scope} AND ${COUNTED} AND ${inRange} GROUP BY label ORDER BY value DESC`,
+    base,
+  );
+  const paymentMix = db.all(
+    `SELECT CASE o.payment_method WHEN 'cod' THEN 'Cash on delivery' ELSE 'Online' END AS label, COUNT(*) AS value, SUM(o.total_paise) AS amount
+       FROM orders o WHERE ${scope} AND ${COUNTED} AND ${inRange} GROUP BY label ORDER BY value DESC`,
+    base,
+  );
+  const statusBreakdown = db.all(
+    `SELECT o.status AS label, COUNT(*) AS value FROM orders o WHERE ${scope} AND ${inRange} GROUP BY o.status ORDER BY value DESC`,
+    base,
+  );
+  const step = (to: string) =>
+    db.get(
+      `SELECT AVG((julianday(h.created_at) - julianday(o.placed_at)) * 24) AS hours, COUNT(*) AS n
+         FROM orders o JOIN order_status_history h ON h.order_id = o.id AND h.to_status = ?
+        WHERE ${scope} AND o.placed_at IS NOT NULL AND ${inRange}`,
+      [to, ...base],
+    )!;
+  const fulfilment = ["ready_for_dispatch", "shipped", "delivered"].map((s) => {
+    const x = step(s);
+    return { step: s, hours: x.hours == null ? null : Math.round(x.hours * 10) / 10, orders: x.n };
+  });
+  const delivery = db.get(
+    `SELECT SUM(a.status = 'delivered') AS delivered, SUM(a.status IN ('failed','returned')) AS failed, SUM(a.status = 'attempted') AS attempted
+       FROM delivery_assignments a JOIN shipments s ON s.id = a.shipment_id JOIN orders o ON o.id = s.order_id
+      WHERE ${scope} AND a.updated_at BETWEEN ? AND ?`,
+    base,
+  )!;
+  const returnReasons = db.all(
+    `SELECT rr.reason AS label, COUNT(*) AS value FROM return_requests rr JOIN orders o ON o.id = rr.order_id
+      WHERE ${scope} AND rr.created_at BETWEEN ? AND ? GROUP BY rr.reason ORDER BY value DESC`,
+    base,
+  );
+  const products = db.all(
+    `SELECT p.id, p.name, p.view_count AS views,
+            COALESCE((SELECT SUM(oi.quantity) FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE oi.product_id = p.id AND ${COUNTED} AND ${inRange}), 0) AS units,
+            COALESCE((SELECT SUM(oi.line_total_paise) FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE oi.product_id = p.id AND ${COUNTED} AND ${inRange}), 0) AS revenue,
+            COALESCE((SELECT SUM(ri.quantity) FROM return_items ri JOIN return_requests rr ON rr.id = ri.return_id JOIN order_items oi ON oi.id = ri.order_item_id WHERE oi.product_id = p.id AND rr.created_at BETWEEN ? AND ?), 0) AS returned
+       FROM products p WHERE p.id IN (SELECT oi.product_id FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE ${scope}) OR ${scope.replace(/o\.store_id/g, "p.store_id")}
+      ORDER BY revenue DESC LIMIT 100`,
+    [r.from, r.to, r.from, r.to, r.from, r.to, ...params, ...params],
+  );
+  return {
+    categories,
+    paymentMix,
+    statusBreakdown,
+    fulfilment,
+    delivery: { delivered: delivery.delivered ?? 0, failed: delivery.failed ?? 0, attempted: delivery.attempted ?? 0 },
+    returnReasons,
+    products: products.map((p) => ({ id: p.id as number, name: p.name as string, views: p.views as number, units: p.units as number, revenue: p.revenue as number, returned: p.returned as number, conversion: p.views ? Math.round((p.units / p.views) * 1000) / 10 : null })),
+    definitions: REPORT_DEFINITIONS,
+  };
+}
+
 export function toCsv(rows: Record<string, unknown>[]): string {
   if (!rows.length) return "";
   const cols = Object.keys(rows[0]);

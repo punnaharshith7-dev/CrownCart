@@ -8,7 +8,7 @@ import { body, email, id } from "../lib/validate.ts";
 import { requireStore, requireUser, storeRolesFor } from "../lib/auth.ts";
 import { audit } from "../lib/audit.ts";
 import { notify, sendEmail } from "../lib/notify.ts";
-import { parseRange, salesMetrics, toCsv } from "../lib/analytics.ts";
+import { parseRange, reportData, salesMetrics, toCsv } from "../lib/analytics.ts";
 import { ORDER_STATUS_LABELS, restockVariant, transitionOrder, type OrderStatus } from "../lib/orders.ts";
 import { cancelAndRefund, startRefund } from "../lib/payments.ts";
 import { approvedPartners, assignPartner, createShipment } from "../lib/fulfilment.ts";
@@ -343,6 +343,10 @@ export const ownerRoutes = new Hono<AppEnv>()
         [input.sku, input.name, input.color ?? null, input.size ?? null, input.pricePaise, input.compareAtPaise ?? null, input.maxPerOrder, input.isActive ? 1 : 0, v.id],
       );
       db.run("UPDATE inventory SET low_stock_threshold = ? WHERE variant_id = ?", [input.lowStockThreshold, v.id]);
+      const before: Record<string, unknown> = { sku: v.sku, name: v.name, color: v.color, size: v.size, compareAtPaise: v.compare_at_paise, maxPerOrder: v.max_per_order, isActive: Boolean(v.is_active) };
+      const after: Record<string, unknown> = { sku: input.sku, name: input.name, color: input.color ?? null, size: input.size ?? null, compareAtPaise: input.compareAtPaise ?? null, maxPerOrder: input.maxPerOrder, isActive: input.isActive };
+      const changed = Object.fromEntries(Object.keys(after).filter((k) => before[k] !== after[k]).map((k) => [k, [before[k], after[k]]]));
+      if (Object.keys(changed).length) audit(db, { actorId: u.id, action: "variant.updated", entityType: "variant", entityId: v.id, storeId, details: changed });
       if (input.pricePaise !== v.price_paise) {
         audit(db, { actorId: u.id, action: "variant.price_changed", entityType: "variant", entityId: v.id, storeId, details: { from: v.price_paise, to: input.pricePaise } });
         if (input.pricePaise < v.price_paise) {
@@ -389,7 +393,7 @@ export const ownerRoutes = new Hono<AppEnv>()
     const m = db.get("SELECT m.* FROM product_media m JOIN products p ON p.id = m.product_id WHERE m.id = ? AND p.store_id = ?", [Number(c.req.param("mediaId")), storeId]);
     if (!m) throw notFound();
     db.run("DELETE FROM product_media WHERE id = ?", [m.id]);
-    audit(db, { actorId: u.id, action: "media.removed", entityType: "product_media", entityId: m.id, storeId });
+    audit(db, { actorId: u.id, action: "media.removed", entityType: "product_media", entityId: m.id, storeId, details: { productId: m.product_id } });
     return c.json({ product: productAdminView(db, m.product_id) });
   })
 
@@ -688,6 +692,198 @@ export const ownerRoutes = new Hono<AppEnv>()
     db.run("DELETE FROM store_members WHERE store_id = ? AND user_id = ?", [storeId, target]);
     audit(db, { actorId: u.id, action: "team.removed", entityType: "store", entityId: storeId, storeId, details: { userId: target } });
     return c.json({ ok: true });
+  })
+
+  // ── Reports ──
+  .get("/stores/:storeId/reports", (c) => {
+    const storeId = sid(c);
+    requireStore(c, storeId, "store.analytics");
+    const db = c.get("db");
+    const range = parseRange(c.req.query("from"), c.req.query("to"));
+    return c.json({ metrics: salesMetrics(db, "o.store_id = ?", [storeId], range), report: reportData(db, "o.store_id = ?", [storeId], range) });
+  })
+
+  .get("/stores/:storeId/reports/products.csv", (c) => {
+    const storeId = sid(c);
+    requireStore(c, storeId, "store.analytics");
+    const range = parseRange(c.req.query("from"), c.req.query("to"));
+    const rows = reportData(c.get("db"), "o.store_id = ?", [storeId], range).products.map((p) => ({
+      product: p.name,
+      views: p.views,
+      units_sold: p.units,
+      revenue: p.revenue / 100,
+      units_returned: p.returned,
+      units_per_100_views: p.conversion ?? "",
+    }));
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header("Content-Disposition", `attachment; filename="product-performance-${range.from.slice(0, 10)}-${range.to.slice(0, 10)}.csv"`);
+    return c.body(toCsv(rows));
+  })
+
+  // ── Bulk catalog data ──
+  .get("/stores/:storeId/catalog.csv", (c) => {
+    const storeId = sid(c);
+    requireStore(c, storeId, "store.products");
+    const rows = c.get("db").all(
+      `SELECT v.sku, p.name AS product, v.name AS variant, v.price_paise / 100.0 AS price, v.compare_at_paise / 100.0 AS compare_at_price,
+              i.on_hand, i.low_stock_threshold, v.is_active AS active, p.status AS product_status
+         FROM product_variants v JOIN products p ON p.id = v.product_id JOIN inventory i ON i.variant_id = v.id
+        WHERE p.store_id = ? ORDER BY p.name, v.sort_order`,
+      [storeId],
+    );
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header("Content-Disposition", 'attachment; filename="catalog.csv"');
+    return c.body(toCsv(rows));
+  })
+
+  /**
+   * Bulk price/stock update keyed by SKU. All rows are validated first; nothing
+   * is written unless every row is valid. Stock is set to an absolute count and
+   * recorded as a 'stock_count' movement.
+   */
+  .post("/stores/:storeId/bulk-update", async (c) => {
+    const storeId = sid(c);
+    const u = requireUser(c);
+    const input = await body(
+      c,
+      z.object({
+        rows: z
+          .array(
+            z.object({
+              sku: z.string().trim().min(1).max(40),
+              pricePaise: z.number().int().positive().optional(),
+              compareAtPaise: z.number().int().positive().nullable().optional(),
+              onHand: z.number().int().min(0).max(1_000_000).optional(),
+              lowStockThreshold: z.number().int().min(0).max(1000).optional(),
+              isActive: z.boolean().optional(),
+            }),
+          )
+          .min(1)
+          .max(2000),
+        dryRun: z.boolean().default(false),
+      }),
+    );
+    const touchesPrice = input.rows.some((r) => r.pricePaise != null || r.compareAtPaise !== undefined || r.isActive != null);
+    const touchesStock = input.rows.some((r) => r.onHand != null || r.lowStockThreshold != null);
+    if (touchesPrice) requireStore(c, storeId, "store.products");
+    if (touchesStock) requireStore(c, storeId, "store.inventory");
+    const db = c.get("db");
+    const errors: { row: number; sku: string; error: string }[] = [];
+    const changes: { sku: string; changes: string[] }[] = [];
+    const plan = input.rows.map((r, i) => {
+      const v = db.get(
+        "SELECT v.*, i.on_hand, i.reserved, i.low_stock_threshold FROM product_variants v JOIN products p ON p.id = v.product_id JOIN inventory i ON i.variant_id = v.id WHERE v.sku = ? AND p.store_id = ?",
+        [r.sku, storeId],
+      );
+      if (!v) errors.push({ row: i + 2, sku: r.sku, error: "SKU not found in this store." });
+      else {
+        const price = r.pricePaise ?? v.price_paise;
+        const compare = r.compareAtPaise === undefined ? v.compare_at_paise : r.compareAtPaise;
+        if (compare != null && compare <= price) errors.push({ row: i + 2, sku: r.sku, error: "Compare-at price must be higher than the price." });
+        if (r.onHand != null && r.onHand < v.reserved) errors.push({ row: i + 2, sku: r.sku, error: `Stock can't be below ${v.reserved} reserved units.` });
+        const diff: string[] = [];
+        if (r.pricePaise != null && r.pricePaise !== v.price_paise) diff.push(`price ${v.price_paise / 100} → ${r.pricePaise / 100}`);
+        if (r.compareAtPaise !== undefined && r.compareAtPaise !== v.compare_at_paise) diff.push(`compare-at ${(v.compare_at_paise ?? 0) / 100} → ${(r.compareAtPaise ?? 0) / 100}`);
+        if (r.onHand != null && r.onHand !== v.on_hand) diff.push(`stock ${v.on_hand} → ${r.onHand}`);
+        if (r.lowStockThreshold != null && r.lowStockThreshold !== v.low_stock_threshold) diff.push(`alert ${v.low_stock_threshold} → ${r.lowStockThreshold}`);
+        if (r.isActive != null && r.isActive !== Boolean(v.is_active)) diff.push(r.isActive ? "activated" : "deactivated");
+        if (diff.length) changes.push({ sku: r.sku, changes: diff });
+      }
+      return { r, v };
+    });
+    if (errors.length || input.dryRun) return c.json({ ok: errors.length === 0, applied: false, errors, changes });
+    db.tx(() => {
+      for (const { r, v: found } of plan) {
+        const v = found!;
+        if (r.pricePaise != null || r.compareAtPaise !== undefined || r.isActive != null) {
+          db.run("UPDATE product_variants SET price_paise = ?, compare_at_paise = ?, is_active = ? WHERE id = ?", [
+            r.pricePaise ?? v.price_paise,
+            r.compareAtPaise === undefined ? v.compare_at_paise : r.compareAtPaise,
+            r.isActive == null ? v.is_active : r.isActive ? 1 : 0,
+            v.id,
+          ]);
+        }
+        if (r.lowStockThreshold != null) db.run("UPDATE inventory SET low_stock_threshold = ? WHERE variant_id = ?", [r.lowStockThreshold, v.id]);
+        if (r.onHand != null && r.onHand !== v.on_hand) {
+          db.run("UPDATE inventory SET on_hand = ? WHERE variant_id = ?", [r.onHand, v.id]);
+          db.run("INSERT INTO inventory_movements (variant_id, delta_on_hand, reason, ref_type, ref_id, actor_user_id) VALUES (?, ?, 'stock_count', 'note', 'bulk import', ?)", [
+            v.id,
+            r.onHand - v.on_hand,
+            u.id,
+          ]);
+        }
+      }
+      audit(db, { actorId: u.id, action: "catalog.bulk_update", entityType: "store", entityId: storeId, storeId, details: { rows: changes.length, changes: changes.slice(0, 200) }, ip: c.get("ip") });
+    });
+    return c.json({ ok: true, applied: true, errors: [], changes });
+  })
+
+  // ── Detailed product editing ──
+  .patch("/stores/:storeId/media/:mediaId", async (c) => {
+    const storeId = sid(c);
+    const u = requireStore(c, storeId, "store.products");
+    const input = await body(c, z.object({ alt: z.string().trim().max(200).optional(), sortOrder: z.number().int().min(0).max(1000).optional(), variantId: id.nullable().optional(), kind: z.enum(["image", "hero", "poster"]).optional() }));
+    const db = c.get("db");
+    const m = db.get("SELECT m.* FROM product_media m JOIN products p ON p.id = m.product_id WHERE m.id = ? AND p.store_id = ?", [Number(c.req.param("mediaId")), storeId]);
+    if (!m) throw notFound();
+    if (input.variantId && !db.get("SELECT 1 FROM product_variants WHERE id = ? AND product_id = ?", [input.variantId, m.product_id])) throw badRequest("That variant belongs to another product.");
+    if (input.kind && !["image", "hero", "poster"].includes(m.kind)) throw badRequest("Only images can change type.");
+    db.run("UPDATE product_media SET alt = COALESCE(?, alt), sort_order = COALESCE(?, sort_order), variant_id = CASE WHEN ? THEN ? ELSE variant_id END, kind = COALESCE(?, kind) WHERE id = ?", [
+      input.alt ?? null,
+      input.sortOrder ?? null,
+      input.variantId !== undefined ? 1 : 0,
+      input.variantId ?? null,
+      input.kind ?? null,
+      m.id,
+    ]);
+    audit(db, { actorId: u.id, action: "media.updated", entityType: "product_media", entityId: m.id, storeId, details: { ...input, productId: m.product_id } });
+    return c.json({ product: productAdminView(db, m.product_id) });
+  })
+
+  .get("/stores/:storeId/products/:productId/history", (c) => {
+    const storeId = sid(c);
+    requireStore(c, storeId, "store.products");
+    const db = c.get("db");
+    const p = storeProduct(db, storeId, Number(c.req.param("productId")));
+    const variantIds = db.all("SELECT id FROM product_variants WHERE product_id = ?", [p.id]).map((v) => String(v.id));
+    const events = db.all(
+      `SELECT a.action, a.entity_type, a.entity_id, a.details, a.created_at, u.name AS actor FROM audit_logs a LEFT JOIN users u ON u.id = a.actor_user_id
+        WHERE a.store_id = ? AND ((a.entity_type = 'product' AND a.entity_id = ?) OR (a.entity_type = 'variant' AND a.entity_id IN (${variantIds.map(() => "?").join(",") || "''"}))
+              OR (a.entity_type = 'product_media' AND json_extract(a.details, '$.productId') = ?))
+        ORDER BY a.id DESC LIMIT 200`,
+      [storeId, String(p.id), ...variantIds, p.id],
+    );
+    return c.json({ events: events.map((e) => ({ ...e, details: JSON.parse(e.details) })) });
+  })
+
+  .post("/stores/:storeId/products/:productId/duplicate", (c) => {
+    const storeId = sid(c);
+    const u = requireStore(c, storeId, "store.products");
+    const db = c.get("db");
+    const p = storeProduct(db, storeId, Number(c.req.param("productId")));
+    const newId = db.tx(() => {
+      const nid = db.run(
+        `INSERT INTO products (store_id, brand_id, category_id, slug, name, title_line1, title_line2, accent, tagline, badge, description, care, warranty, return_days, status, seo_title, seo_description)
+         SELECT store_id, brand_id, category_id, ?, name || ' (copy)', title_line1, title_line2, accent, tagline, badge, description, care, warranty, return_days, 'draft', seo_title, seo_description
+           FROM products WHERE id = ?`,
+        [uniqueSlug(db, "products", `${p.slug}-copy`), p.id],
+      ).lastId;
+      db.run("INSERT INTO product_specs (product_id, label, value, sort_order) SELECT ?, label, value, sort_order FROM product_specs WHERE product_id = ?", [nid, p.id]);
+      db.run("INSERT INTO product_media (product_id, kind, url, alt, sort_order) SELECT ?, kind, url, alt, sort_order FROM product_media WHERE product_id = ?", [nid, p.id]);
+      for (const v of db.all("SELECT * FROM product_variants WHERE product_id = ? ORDER BY sort_order", [p.id])) {
+        let sku = `${v.sku}-COPY`;
+        for (let i = 2; db.get("SELECT 1 FROM product_variants WHERE sku = ?", [sku]); i++) sku = `${v.sku}-COPY${i}`;
+        const vid = db.run(
+          "INSERT INTO product_variants (product_id, sku, name, color, size, price_paise, compare_at_paise, max_per_order, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [nid, sku, v.name, v.color, v.size, v.price_paise, v.compare_at_paise, v.max_per_order, v.is_active, v.sort_order],
+        ).lastId;
+        // Stock is never copied: the duplicate starts empty.
+        db.run("INSERT INTO inventory (variant_id, on_hand) VALUES (?, 0)", [vid]);
+      }
+      audit(db, { actorId: u.id, action: "product.duplicated", entityType: "product", entityId: nid, storeId, details: { from: p.id } });
+      return nid;
+    });
+    return c.json({ product: productAdminView(db, newId) }, 201);
   })
 
   .get("/categories", (c) => {

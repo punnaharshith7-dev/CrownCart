@@ -7,7 +7,7 @@ import { body, email, id, pincode } from "../lib/validate.ts";
 import { requireAdmin, requireUser, revokeUserSessions } from "../lib/auth.ts";
 import { audit } from "../lib/audit.ts";
 import { notify, sendEmail } from "../lib/notify.ts";
-import { parseRange, salesMetrics, toCsv } from "../lib/analytics.ts";
+import { parseRange, reportData, salesMetrics, toCsv } from "../lib/analytics.ts";
 import { ORDER_STATUS_LABELS, DELIVERY_STATUS_LABELS, transitionOrder } from "../lib/orders.ts";
 import { cancelAndRefund, markRefundProcessed, startRefund } from "../lib/payments.ts";
 import { approvedPartners, assignPartner, createShipment } from "../lib/fulfilment.ts";
@@ -388,11 +388,17 @@ export const adminRoutes = new Hono<AppEnv>()
 
   .patch("/categories/:id", async (c) => {
     const admin = requireAdmin(c, "admin.catalog");
-    const input = await body(c, z.object({ name: z.string().trim().min(2).max(60).optional(), description: z.string().trim().max(300).optional(), isActive: z.boolean().optional(), sortOrder: z.number().int().optional() }));
+    const input = await body(c, z.object({ name: z.string().trim().min(2).max(60).optional(), description: z.string().trim().max(300).optional(), isActive: z.boolean().optional(), sortOrder: z.number().int().optional(), parentId: id.nullable().optional() }));
     const db = c.get("db");
+    const catId = Number(c.req.param("id"));
+    if (input.parentId) {
+      // Refuse cycles: the new parent may not be this category or one of its descendants.
+      const desc = db.all("WITH RECURSIVE t(id) AS (SELECT ? UNION ALL SELECT c.id FROM categories c JOIN t ON c.parent_id = t.id) SELECT id FROM t", [catId]).map((r) => r.id);
+      if (desc.includes(input.parentId)) throw badRequest("A category can't be placed inside itself.");
+    }
     const r = db.run(
-      "UPDATE categories SET name = COALESCE(?, name), description = COALESCE(?, description), is_active = COALESCE(?, is_active), sort_order = COALESCE(?, sort_order) WHERE id = ?",
-      [input.name ?? null, input.description ?? null, input.isActive == null ? null : input.isActive ? 1 : 0, input.sortOrder ?? null, Number(c.req.param("id"))],
+      "UPDATE categories SET name = COALESCE(?, name), description = COALESCE(?, description), is_active = COALESCE(?, is_active), sort_order = COALESCE(?, sort_order), parent_id = CASE WHEN ? THEN ? ELSE parent_id END WHERE id = ?",
+      [input.name ?? null, input.description ?? null, input.isActive == null ? null : input.isActive ? 1 : 0, input.sortOrder ?? null, input.parentId !== undefined ? 1 : 0, input.parentId ?? null, catId],
     );
     if (!r.changes) throw notFound();
     audit(db, { actorId: admin.id, action: "category.updated", entityType: "category", entityId: c.req.param("id"), details: input });
@@ -651,6 +657,69 @@ export const adminRoutes = new Hono<AppEnv>()
     if (!db.run("UPDATE coupons SET is_active = ? WHERE id = ?", [isActive ? 1 : 0, Number(c.req.param("id"))]).changes) throw notFound();
     audit(db, { actorId: admin.id, action: isActive ? "coupon.activated" : "coupon.deactivated", entityType: "coupon", entityId: c.req.param("id") });
     return c.json({ ok: true });
+  })
+
+  // ── Reports ──
+  .get("/reports", (c) => {
+    requireAdmin(c, "admin.finance");
+    const db = c.get("db");
+    const range = parseRange(c.req.query("from"), c.req.query("to"));
+    const storeId = c.req.query("storeId") ? Number(c.req.query("storeId")) : null;
+    const [scope, params] = storeId ? ["o.store_id = ?", [storeId]] : ["1", []];
+    const stores = db.all(
+      `SELECT s.id, s.name, COUNT(o.id) AS orders, COALESCE(SUM(o.subtotal_paise),0) AS gross, COALESCE(SUM(o.discount_paise),0) AS discounts,
+              COALESCE(SUM(o.refunded_paise),0) AS refunds, COALESCE(SUM(o.subtotal_paise - o.discount_paise - o.refunded_paise),0) AS net
+         FROM stores s LEFT JOIN orders o ON o.store_id = s.id AND o.status NOT IN ('pending_payment','failed','expired','cancelled')
+              AND COALESCE(o.placed_at, o.created_at) BETWEEN ? AND ?
+        GROUP BY s.id ORDER BY net DESC`,
+      [range.from, range.to],
+    );
+    const customers = db.get(
+      `SELECT COUNT(DISTINCT o.user_id) AS buyers,
+              (SELECT COUNT(*) FROM (SELECT user_id FROM orders o2 WHERE o2.status NOT IN ('pending_payment','failed','expired') GROUP BY user_id HAVING COUNT(*) > 1)) AS repeat_buyers,
+              (SELECT COUNT(*) FROM users WHERE created_at BETWEEN ? AND ?) AS signups
+         FROM orders o WHERE o.status NOT IN ('pending_payment','failed','expired') AND COALESCE(o.placed_at, o.created_at) BETWEEN ? AND ?`,
+      [range.from, range.to, range.from, range.to],
+    )!;
+    return c.json({
+      metrics: salesMetrics(db, scope as string, params as number[], range),
+      report: reportData(db, scope as string, params as number[], range),
+      stores: stores.map((s) => ({ id: s.id, name: s.name, orders: s.orders, grossPaise: s.gross, discountsPaise: s.discounts, refundsPaise: s.refunds, netPaise: s.net })),
+      customers: { buyers: customers.buyers, repeatBuyers: customers.repeat_buyers, signups: customers.signups },
+    });
+  })
+
+  .get("/reports/stores.csv", (c) => {
+    requireAdmin(c, "admin.finance");
+    const range = parseRange(c.req.query("from"), c.req.query("to"));
+    const rows = c.get("db").all(
+      `SELECT s.name AS store, COUNT(o.id) AS orders, COALESCE(SUM(o.subtotal_paise),0)/100.0 AS gross_sales, COALESCE(SUM(o.discount_paise),0)/100.0 AS discounts,
+              COALESCE(SUM(o.refunded_paise),0)/100.0 AS refunds, COALESCE(SUM(o.subtotal_paise - o.discount_paise - o.refunded_paise),0)/100.0 AS net_sales,
+              COALESCE(SUM(o.shipping_paise),0)/100.0 AS shipping
+         FROM stores s LEFT JOIN orders o ON o.store_id = s.id AND o.status NOT IN ('pending_payment','failed','expired','cancelled')
+              AND COALESCE(o.placed_at, o.created_at) BETWEEN ? AND ?
+        GROUP BY s.id ORDER BY net_sales DESC`,
+      [range.from, range.to],
+    );
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header("Content-Disposition", `attachment; filename="sales-by-store-${range.from.slice(0, 10)}-${range.to.slice(0, 10)}.csv"`);
+    return c.body(toCsv(rows));
+  })
+
+  .get("/reports/orders.csv", (c) => {
+    requireAdmin(c, "admin.finance");
+    const range = parseRange(c.req.query("from"), c.req.query("to"));
+    const rows = c.get("db").all(
+      `SELECT o.number, s.name AS store, COALESCE(o.placed_at, o.created_at) AS placed_at, o.status, o.payment_method, o.payment_status,
+              o.subtotal_paise/100.0 AS subtotal, o.discount_paise/100.0 AS discount, o.shipping_paise/100.0 AS shipping, o.total_paise/100.0 AS total,
+              o.refunded_paise/100.0 AS refunded, o.coupon_code, o.ship_city, o.ship_state, o.ship_pincode
+         FROM orders o JOIN stores s ON s.id = o.store_id
+        WHERE o.status != 'pending_payment' AND COALESCE(o.placed_at, o.created_at) BETWEEN ? AND ? ORDER BY placed_at`,
+      [range.from, range.to],
+    );
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header("Content-Disposition", `attachment; filename="orders-${range.from.slice(0, 10)}-${range.to.slice(0, 10)}.csv"`);
+    return c.body(toCsv(rows));
   })
 
   // ── Configuration ──

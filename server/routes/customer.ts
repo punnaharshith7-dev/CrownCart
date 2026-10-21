@@ -9,6 +9,7 @@ import { summarizeCart } from "../lib/pricing.ts";
 import { audit } from "../lib/audit.ts";
 import { verifyPassword } from "../lib/crypto.ts";
 import { toCard } from "./catalog.ts";
+import { getSetting } from "../lib/settings.ts";
 
 interface VariantCheck {
   id: number;
@@ -193,6 +194,7 @@ export const wishlistRoutes = new Hono<AppEnv>()
     const u = requireUser(c);
     const { productId } = await body(c, z.object({ productId: id }));
     const db = c.get("db");
+    if (!getSetting(db, "features").wishlist) throw conflict("The wishlist is turned off right now.");
     if (!db.get("SELECT 1 FROM products WHERE id = ? AND status = 'active'", [productId])) throw notFound();
     db.run("INSERT OR IGNORE INTO wishlist_items (user_id, product_id) VALUES (?, ?)", [u.id, productId]);
     return c.json({ ok: true }, 201);

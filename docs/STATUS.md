@@ -56,16 +56,18 @@ With no email provider set, emails are printed in the API console and listed at 
 | Checkout: addresses, serviceability, COD, idempotent order placement, stock reservation | Built |
 | Razorpay online payments: order creation, signature + amount verification, webhooks, refunds | Built — **blocked: needs keys** |
 | Customer account: orders, tracking timeline, cancel, return/exchange, invoices, wishlist, addresses, notifications, support, settings, sessions, delete account | Built |
-| Store portal: dashboard metrics, orders and fulfilment, returns, products and variants, media upload, inventory with movement log, coupons, team invites, CSV export | Built (basic) |
-| Admin portal: overview, users and roles, invitations, stores, catalog moderation and homepage slots, orders, refunds, delivery partners and shipments, reviews, support, coupons, key settings, audit log | Built (basic) |
+| Store portal: dashboard, orders and fulfilment, returns, inventory with movement log, coupons, team invites | Built |
+| Detailed product editing: full variant editor, media alt text / ordering / per-variant images / type, change history, duplicate, bulk CSV price & stock update with preview | Built |
+| Reports (store and admin): daily sales and orders charts, category revenue, top products, payment mix, status breakdown, fulfilment speed, delivery success, return reasons, coupon performance, product performance table, CSV exports | Built |
+| Admin portal: overview, users and roles, invitations, stores, catalog moderation and homepage slots, categories (nesting, order), orders, refunds, delivery partners and shipments, reviews, support, platform coupons, audit log | Built |
+| Admin settings: brand, homepage (announcement bar, menu sections and order), shipping, payments and checkout, tax note, delivery, returns and reviews, feature switches (enforced on the server), maintenance, integrations status | Built |
 | Delivery portal (mobile-first): assignments, server-enforced status flow, delivery code (OTP), failure reasons, return to sender, history, availability | Built |
 | Light / dark / system themes, reduced motion, WebGL fallback, keyboard focus, skip links | Built |
 | robots.txt, sitemap.xml, per-page titles, noindex on private pages | Built |
 
 ## Set aside until the owner returns
 
-- Fuller portal screens: detailed product editor (variant colours/sizes matrix, bulk CSV import),
-  every admin settings page (brand, homepage section editor, email templates), richer charts and reports.
+- Logo/favicon upload and editable email templates (brand settings cover text only).
 - Integrations needing credentials: Google sign-in (env vars reserved, not wired), live Razorpay,
   real email (Resend supported via `EMAIL_PROVIDER=resend`), SMS/WhatsApp, courier APIs.
 - Testing and bug fixing (unit, integration, end-to-end, security, accessibility).

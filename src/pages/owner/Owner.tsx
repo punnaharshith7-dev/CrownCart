@@ -9,6 +9,7 @@ import { useToast } from "../../lib/toast";
 import { useApi } from "../../lib/useApi";
 import { OrderLines, OrderTimeline, ShipmentTracking, type OrderDetail } from "../account/Account";
 import { formatAddress } from "../../components/AddressForm";
+import { BulkUpdate, MediaEditor, OwnerReports, ProductHistory, VariantsEditor } from "./OwnerExtras";
 
 const STORE_KEY = "cc-owner-store";
 
@@ -463,7 +464,37 @@ function ProductEditor({ storeId }: { storeId: number }) {
       <Link to="/owner/products" className="small">
         ← Products
       </Link>
-      <PageHead title={isNew ? "New product" : f.name || "Product"} actions={p?.status === "active" && <Link className="btn btn-outline btn-sm" to={`/product/${p.slug}`} target="_blank">View in store</Link>} />
+      <PageHead
+        title={isNew ? "New product" : f.name || "Product"}
+        actions={
+          p && (
+            <>
+              {p.status === "active" ? (
+                <Link className="btn btn-outline btn-sm" to={`/product/${p.slug}`} target="_blank">
+                  View in store
+                </Link>
+              ) : (
+                <span className="tiny muted">Not visible to customers until Active</span>
+              )}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={async () => {
+                  try {
+                    const r = await api.post<{ product: { id: number } }>(`/owner/stores/${storeId}/products/${p.id}/duplicate`);
+                    toast("Duplicated as a draft with zero stock.", "success");
+                    navigate(`/owner/products/${r.product.id}`);
+                  } catch (e) {
+                    toast(errorMessage(e), "error");
+                  }
+                }}
+              >
+                Duplicate
+              </button>
+            </>
+          )
+        }
+      />
       <form className="two-col" onSubmit={save}>
         <div className="stack">
           <section className="card stack">
@@ -515,8 +546,9 @@ function ProductEditor({ storeId }: { storeId: number }) {
             </section>
           ) : (
             <>
-              <VariantsPanel storeId={storeId} product={p} onChange={existing.reload} />
-              <MediaPanel storeId={storeId} product={p} onChange={existing.reload} />
+              <VariantsEditor storeId={storeId} product={p} onChange={existing.reload} />
+              <MediaEditor storeId={storeId} product={p} onChange={existing.reload} />
+              <ProductHistory key={p.updatedAt + p.variants.length + p.media.length} storeId={storeId} productId={p.id} />
             </>
           )}
         </div>
@@ -543,143 +575,6 @@ function ProductEditor({ storeId }: { storeId: number }) {
         </aside>
       </form>
     </div>
-  );
-}
-
-function VariantsPanel({ storeId, product, onChange }: { storeId: number; product: any; onChange: () => void }) {
-  const toast = useToast();
-  const [add, setAdd] = useState(false);
-  const [v, setV] = useState({ sku: "", name: "", size: "", price: "", stock: "0" });
-  return (
-    <section className="card stack">
-      <div className="spread">
-        <h2 className="h3">Variants & pricing</h2>
-        <button type="button" className="btn btn-outline btn-sm" onClick={() => setAdd(true)}>
-          + Variant
-        </button>
-      </div>
-      <div className="table-wrap">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>SKU</th>
-              <th>Name</th>
-              <th>Price (₹)</th>
-              <th>On hand</th>
-              <th>Reserved</th>
-              <th>Active</th>
-            </tr>
-          </thead>
-          <tbody>
-            {product.variants.map((x: any) => (
-              <tr key={x.id}>
-                <td>{x.sku}</td>
-                <td>{x.name}</td>
-                <td>
-                  <input
-                    className="input"
-                    style={{ width: 120, minHeight: 34 }}
-                    aria-label={`Price for ${x.sku}`}
-                    defaultValue={x.pricePaise / 100}
-                    onBlur={async (e) => {
-                      const price = Math.round(Number(e.target.value) * 100);
-                      if (!price || price === x.pricePaise) return;
-                      try {
-                        await api.put(`/owner/stores/${storeId}/variants/${x.id}`, { ...x, pricePaise: price });
-                        toast(`Price for ${x.sku} updated.`, "success");
-                        onChange();
-                      } catch (err) {
-                        toast(errorMessage(err), "error");
-                      }
-                    }}
-                  />
-                </td>
-                <td>{x.onHand}</td>
-                <td>{x.reserved}</td>
-                <td>
-                  <input type="checkbox" aria-label={`${x.sku} active`} checked={x.isActive} onChange={(e) => api.put(`/owner/stores/${storeId}/variants/${x.id}`, { ...x, isActive: e.target.checked }).then(onChange).catch((err) => toast(errorMessage(err), "error"))} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="tiny muted">Stock is changed from Inventory so every change is recorded.</p>
-      {add && (
-        <Modal title="New variant" onClose={() => setAdd(false)}>
-          <form
-            className="stack"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              try {
-                await api.post(`/owner/stores/${storeId}/products/${product.id}/variants`, { sku: v.sku, name: v.name || v.size || "Standard", size: v.size || null, pricePaise: Math.round(Number(v.price) * 100), stock: Number(v.stock) });
-                setAdd(false);
-                onChange();
-              } catch (err) {
-                toast(errorMessage(err), "error");
-              }
-            }}
-          >
-            <TextField label="SKU" required value={v.sku} onChange={(e) => setV({ ...v, sku: e.target.value })} />
-            <TextField label="Name" value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} />
-            <TextField label="Size" value={v.size} onChange={(e) => setV({ ...v, size: e.target.value })} />
-            <TextField label="Price (₹)" required value={v.price} onChange={(e) => setV({ ...v, price: e.target.value })} />
-            <TextField label="Opening stock" value={v.stock} onChange={(e) => setV({ ...v, stock: e.target.value })} />
-            <Button type="submit">Add variant</Button>
-          </form>
-        </Modal>
-      )}
-    </section>
-  );
-}
-
-function MediaPanel({ storeId, product, onChange }: { storeId: number; product: any; onChange: () => void }) {
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-  return (
-    <section className="card stack">
-      <h2 className="h3">Images & media</h2>
-      <div className="row">
-        {product.media.map((m: any) => (
-          <div key={m.id} className="stack" style={{ width: 110, "--gap": "4px" } as React.CSSProperties}>
-            {m.kind === "video" ? <div className="panel tiny">Video</div> : m.kind === "model" ? <div className="panel tiny">3D model</div> : <img src={m.url} alt={m.alt} style={{ width: 110, height: 110, objectFit: "cover", borderRadius: 8 }} />}
-            <span className="tiny muted">{m.kind}</span>
-            <button className="link tiny" onClick={() => api.del(`/owner/stores/${storeId}/media/${m.id}`).then(onChange)}>
-              Remove
-            </button>
-          </div>
-        ))}
-      </div>
-      <form
-        className="row"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          setBusy(true);
-          try {
-            await api.upload(`/owner/stores/${storeId}/products/${product.id}/media`, fd);
-            (e.target as HTMLFormElement).reset();
-            onChange();
-          } catch (err) {
-            toast(errorMessage(err), "error");
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        <input type="file" name="file" accept="image/png,image/jpeg,image/webp,video/mp4,.glb" required aria-label="Media file" />
-        <select name="kind" className="select" style={{ width: "auto" }} aria-label="Media type">
-          <option value="image">Product image</option>
-          <option value="hero">Editorial (hero) image</option>
-          <option value="poster">Video poster</option>
-        </select>
-        <input name="alt" className="input" style={{ maxWidth: 200 }} placeholder="Alt text" aria-label="Alt text" />
-        <Button type="submit" loading={busy} className="btn-outline btn-sm">
-          Upload
-        </Button>
-      </form>
-      <p className="tiny muted">JPG, PNG or WebP up to 8 MB · MP4 up to 60 MB · GLB 3D models up to 40 MB.</p>
-    </section>
   );
 }
 
@@ -970,6 +865,8 @@ export default function Owner() {
     can(r, "orders") && { to: "/owner/orders", label: "Orders" },
     can(r, "products") && { to: "/owner/products", label: "Products" },
     can(r, "inventory") && { to: "/owner/inventory", label: "Inventory" },
+    (can(r, "products") || can(r, "inventory")) && { to: "/owner/bulk", label: "Bulk update" },
+    can(r, "analytics") && { to: "/owner/reports", label: "Reports" },
     can(r, "promotions") && { to: "/owner/promotions", label: "Promotions" },
     can(r, "team") && { to: "/owner/team", label: "Team" },
   ].filter(Boolean) as { to: string; label: string; end?: boolean }[];
@@ -1004,6 +901,8 @@ export default function Owner() {
           <Route path="products" element={<Products storeId={storeId} />} />
           <Route path="products/:id" element={<ProductEditor storeId={storeId} />} />
           <Route path="inventory" element={<Inventory storeId={storeId} />} />
+          <Route path="bulk" element={<BulkUpdate storeId={storeId} />} />
+          <Route path="reports" element={<OwnerReports storeId={storeId} />} />
           <Route path="promotions" element={<Coupons storeId={storeId} />} />
           <Route path="team" element={<Team storeId={storeId} />} />
           <Route path="*" element={<Empty title="Not found" />} />

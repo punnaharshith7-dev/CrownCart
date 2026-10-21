@@ -9,6 +9,7 @@ import { useToast } from "../../lib/toast";
 import { useApi } from "../../lib/useApi";
 import { OrderLines, OrderTimeline, ShipmentTracking, type OrderDetail } from "../account/Account";
 import { formatAddress } from "../../components/AddressForm";
+import { AdminReports, CategoriesAdmin, CouponsAdmin, SettingsPages } from "./AdminExtras";
 
 function useAction() {
   const toast = useToast();
@@ -412,9 +413,7 @@ function Stores() {
 function Catalog() {
   const [q, setQ] = useState("");
   const { data, reload } = useApi<{ products: any[] }>(`/admin/products?q=${encodeURIComponent(q)}`);
-  const cats = useApi<{ categories: any[] }>("/admin/categories");
   const { run } = useAction();
-  const [catName, setCatName] = useState("");
   return (
     <div className="stack" style={{ "--gap": "24px" } as React.CSSProperties}>
       <PageHead title="Catalog" eyebrow="Moderation & homepage merchandising" />
@@ -463,23 +462,9 @@ function Catalog() {
         </table>
       </div>
       <p className="tiny muted">The homepage shows the first four slotted products in the cinematic showcase. Their editorial artwork comes from each product's hero image.</p>
-      <section className="stack">
-        <h2 className="h3">Categories</h2>
-        <form className="row" onSubmit={(e) => (e.preventDefault(), run(() => api.post("/admin/categories", { name: catName }), "Category created.", () => (setCatName(""), cats.reload())))}>
-          <input className="input" style={{ maxWidth: 260 }} required placeholder="New category name" aria-label="New category name" value={catName} onChange={(e) => setCatName(e.target.value)} />
-          <button className="btn btn-outline btn-sm" type="submit">
-            Add
-          </button>
-        </form>
-        <div className="row">
-          {cats.data?.categories.map((c) => (
-            <label key={c.id} className="chip" style={{ cursor: "pointer" }}>
-              <input type="checkbox" checked={Boolean(c.is_active)} onChange={(e) => run(() => api.patch(`/admin/categories/${c.id}`, { isActive: e.target.checked }), "Category updated.", cats.reload)} />
-              {c.name} <span className="muted">({c.products})</span>
-            </label>
-          ))}
-        </div>
-      </section>
+      <p className="small">
+        <Link to="/admin/categories">Manage categories →</Link>
+      </p>
     </div>
   );
 }
@@ -927,152 +912,6 @@ function Support() {
   );
 }
 
-function Settings() {
-  const { data, error, reload } = useApi<{ settings: any; integrations: Record<string, boolean>; environment: string }>("/admin/settings");
-  const { busy, run } = useAction();
-  const [draft, setDraft] = useState<any>(null);
-  useEffect(() => {
-    if (data) setDraft(structuredClone(data.settings));
-  }, [data]);
-  if (error) return <ErrorState error={error} retry={reload} />;
-  if (!data || !draft) return <Loading />;
-  const save = (key: string) => run(() => api.put(`/admin/settings/${key}`, draft[key]), "Settings saved.", reload);
-  const rupees = (k: string, f: string) => ({
-    value: draft[k][f] / 100,
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) => setDraft({ ...draft, [k]: { ...draft[k], [f]: Math.round(Number(e.target.value) * 100) } }),
-  });
-  const flag = (k: string, f: string) => ({
-    checked: Boolean(draft[k][f]),
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) => setDraft({ ...draft, [k]: { ...draft[k], [f]: e.target.checked } }),
-  });
-  return (
-    <div className="stack" style={{ "--gap": "20px" } as React.CSSProperties}>
-      <PageHead title="Platform settings" eyebrow={`Environment: ${data.environment}`} />
-      <section className="card stack">
-        <h2 className="h3">Integrations</h2>
-        <p className="small muted">Credentials live in the server environment and are never shown here.</p>
-        <div className="row">
-          {Object.entries(data.integrations).map(([k, v]) => (
-            <span key={k} className={`badge ${v ? "badge-success" : "badge-warning"}`}>
-              {titleCase(k)}: {v ? "configured" : "not configured"}
-            </span>
-          ))}
-        </div>
-      </section>
-      <div className="grid" style={{ "--min": "320px", alignItems: "start" } as React.CSSProperties}>
-        <section className="card stack">
-          <h2 className="h3">Shipping</h2>
-          <TextField label="Flat shipping fee (₹)" type="number" min={0} {...rupees("shipping", "flatPaise")} />
-          <TextField label="Free shipping from (₹)" type="number" min={0} {...rupees("shipping", "freeThresholdPaise")} />
-          <div className="row">
-            <TextField label="Min days" type="number" value={draft.shipping.estimateDaysMin} onChange={(e) => setDraft({ ...draft, shipping: { ...draft.shipping, estimateDaysMin: Number(e.target.value) } })} />
-            <TextField label="Max days" type="number" value={draft.shipping.estimateDaysMax} onChange={(e) => setDraft({ ...draft, shipping: { ...draft.shipping, estimateDaysMax: Number(e.target.value) } })} />
-          </div>
-          <TextField
-            label="Serviceable PIN prefixes"
-            hint="Comma-separated, e.g. 560, 110. Leave empty to deliver everywhere."
-            value={draft.shipping.serviceablePincodePrefixes.join(", ")}
-            onChange={(e) => setDraft({ ...draft, shipping: { ...draft.shipping, serviceablePincodePrefixes: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } })}
-          />
-          <Button loading={busy} onClick={() => save("shipping")}>
-            Save shipping
-          </Button>
-        </section>
-        <section className="card stack">
-          <h2 className="h3">Checkout & payments</h2>
-          <label className="check">
-            <input type="checkbox" {...flag("cod", "enabled")} />
-            <span>Offer cash on delivery</span>
-          </label>
-          <TextField label="COD limit per order (₹)" type="number" {...rupees("cod", "maxOrderPaise")} />
-          <Button className="btn-outline" loading={busy} onClick={() => save("cod")}>
-            Save COD
-          </Button>
-          <label className="check">
-            <input type="checkbox" {...flag("checkout", "requireVerifiedEmail")} />
-            <span>Require a verified email to place orders</span>
-          </label>
-          <TextField label="Online payment window (minutes)" type="number" value={draft.checkout.paymentWindowMinutes} onChange={(e) => setDraft({ ...draft, checkout: { ...draft.checkout, paymentWindowMinutes: Number(e.target.value) } })} />
-          <Button className="btn-outline" loading={busy} onClick={() => save("checkout")}>
-            Save checkout
-          </Button>
-        </section>
-        <section className="card stack">
-          <h2 className="h3">Operations</h2>
-          <label className="check">
-            <input type="checkbox" {...flag("delivery", "requireOtp")} />
-            <span>Require the customer's delivery code to complete delivery</span>
-          </label>
-          <Button className="btn-outline" loading={busy} onClick={() => save("delivery")}>
-            Save delivery
-          </Button>
-          <label className="check">
-            <input type="checkbox" {...flag("reviews", "requireModeration")} />
-            <span>Moderate reviews before publishing</span>
-          </label>
-          <label className="check">
-            <input type="checkbox" {...flag("reviews", "verifiedPurchaseOnly")} />
-            <span>Only verified buyers can review</span>
-          </label>
-          <Button className="btn-outline" loading={busy} onClick={() => save("reviews")}>
-            Save reviews
-          </Button>
-        </section>
-        <section className="card stack">
-          <h2 className="h3">Maintenance mode</h2>
-          <label className="check">
-            <input type="checkbox" {...flag("maintenance", "enabled")} />
-            <span>Pause shopping (browsing still works; admins are unaffected)</span>
-          </label>
-          <TextArea label="Message" value={draft.maintenance.message} onChange={(e) => setDraft({ ...draft, maintenance: { ...draft.maintenance, message: e.target.value } })} />
-          <Button className={draft.maintenance.enabled ? "btn-danger" : ""} loading={busy} onClick={() => save("maintenance")}>
-            Save maintenance
-          </Button>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-function Coupons() {
-  const { data, reload } = useApi<{ coupons: any[] }>("/admin/coupons");
-  const { run } = useAction();
-  return (
-    <div className="stack">
-      <PageHead title="Coupons" eyebrow="Platform-wide and store coupons" />
-      <div className="table-wrap">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>Scope</th>
-              <th>Discount</th>
-              <th>Used</th>
-              <th>Active</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data?.coupons.map((c) => (
-              <tr key={c.id}>
-                <td>
-                  {c.code}
-                  <div className="tiny muted">{c.description}</div>
-                </td>
-                <td>{c.store ?? "All stores"}</td>
-                <td>{c.kind === "percent" ? `${c.value}%${c.max_discount_paise ? ` (max ${inr(c.max_discount_paise)})` : ""}` : inr(c.value)}</td>
-                <td>{c.used}</td>
-                <td>
-                  <input type="checkbox" aria-label={`${c.code} active`} checked={Boolean(c.is_active)} onChange={(e) => run(() => api.patch(`/admin/coupons/${c.id}`, { isActive: e.target.checked }), "Coupon updated.", reload)} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 function Audit() {
   const [action, setAction] = useState("");
   const [actor, setActor] = useState("");
@@ -1151,9 +990,11 @@ export default function Admin() {
   const nav = [
     { to: "/admin", label: "Overview", end: true },
     has("admin.orders") && { to: "/admin/orders", label: "Orders" },
+    has("admin.finance") && { to: "/admin/reports", label: "Reports" },
     has("admin.users") && { to: "/admin/users", label: "Users & roles" },
     has("admin.stores") && { to: "/admin/stores", label: "Stores" },
     has("admin.catalog") && { to: "/admin/catalog", label: "Catalog" },
+    has("admin.catalog") && { to: "/admin/categories", label: "Categories" },
     has("admin.delivery") && { to: "/admin/delivery", label: "Delivery" },
     has("admin.support") && { to: "/admin/reviews", label: "Reviews" },
     has("admin.support") && { to: "/admin/support", label: "Support" },
@@ -1176,8 +1017,11 @@ export default function Admin() {
         <Route path="reviews" element={<Reviews />} />
         <Route path="support" element={<Support />} />
         <Route path="support/:id" element={<Support />} />
-        <Route path="coupons" element={<Coupons />} />
-        <Route path="settings" element={<Settings />} />
+        <Route path="coupons" element={<CouponsAdmin />} />
+        <Route path="settings" element={<SettingsPages />} />
+        <Route path="settings/:section" element={<SettingsPages />} />
+        <Route path="reports" element={<AdminReports />} />
+        <Route path="categories" element={<CategoriesAdmin />} />
         <Route path="audit" element={<Audit />} />
         <Route path="emails" element={<DevEmails />} />
         <Route path="*" element={<Empty title="Not found" />} />

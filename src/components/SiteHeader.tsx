@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { homeFor, useAuth } from "../lib/auth";
 import { useTheme, type ThemePref } from "../lib/theme";
 import { inr } from "../lib/format";
+import { Announcement } from "./Announcement";
 
 interface Suggest {
   products: { slug: string; name: string; brand: string; image: string; pricePaise: number }[];
@@ -236,6 +237,7 @@ export function StoreLayout({ children }: { children: ReactNode }) {
       <a className="skip-link" href="#main">
         Skip to content
       </a>
+      <Announcement />
       <SiteHeader />
       <main id="main">{children}</main>
       <SiteFooter />

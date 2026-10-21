@@ -260,6 +260,8 @@ export const catalogRoutes = new Hono<AppEnv>()
       showcase: detail,
       categories: f.categories.filter((cat) => !cat.parentId),
       productCount: f.categories.reduce((s, cat) => s + cat.count, 0),
+      features: getSetting(db, "features"),
+      maintenance: getSetting(db, "maintenance"),
     });
   })
 
@@ -406,6 +408,7 @@ export const catalogRoutes = new Hono<AppEnv>()
 
   .post("/products/:slug/reviews", async (c) => {
     const u = requireUser(c);
+    if (!getSetting(c.get("db"), "features").reviews) throw forbidden("Reviews are turned off right now.");
     rateLimit(`review:${u.id}`, 10, 3_600_000);
     const db = c.get("db");
     const p = db.get("SELECT id FROM products WHERE slug = ? AND status = 'active'", [c.req.param("slug")]);

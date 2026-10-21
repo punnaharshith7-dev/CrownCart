@@ -5,6 +5,7 @@ import { ReviewsGallery } from "../ReviewsGallery";
 import { StackedProductsShowcase } from "../FrostedGlassShowcase";
 import { useTitle } from "../lib/useApi";
 import { useTheme } from "../lib/theme";
+import { Announcement } from "../components/Announcement";
 
 function webglAvailable() {
   try {
@@ -45,6 +46,7 @@ export default function Home() {
 
   return (
     <div style={{ width: "100%", minHeight: "100%", position: "relative" }}>
+      <Announcement />
       {/* Section 0: Luxury Hero Baubles Scene (100vh) */}
       <section
         id="hero"

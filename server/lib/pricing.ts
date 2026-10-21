@@ -165,7 +165,9 @@ export function summarizeCart(db: Db, userId: number, couponCode?: string | null
 
   let coupon: CouponRow | null = null;
   let couponError: string | null = null;
-  if (couponCode) {
+  if (couponCode && !getSetting(db, "features").coupons) {
+    couponError = "Coupons are not available right now.";
+  } else if (couponCode) {
     const res = checkCoupon(db, couponCode, userId);
     if ("error" in res) couponError = res.error;
     else coupon = res.coupon;

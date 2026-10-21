@@ -1656,3 +1656,112 @@ details.acc > div {
     font-size: 26px;
   }
 }
+
+/* Charts (validated reference palette, slot 1; dark step selected separately) */
+.viz {
+  --series-1: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz {
+    --series-1: #3987e5;
+  }
+}
+:root[data-theme="dark"] .viz {
+  --series-1: #3987e5;
+}
+.tb {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: 200px auto;
+  column-gap: 8px;
+}
+.tb-y {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  transform: translateY(-6px);
+  height: calc(100% + 12px);
+}
+.tb-plot {
+  position: relative;
+  border-bottom: 1px solid var(--border-strong);
+}
+.tb-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--border);
+}
+.tb-bars {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+}
+.tb-hit {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 1px;
+}
+.tb-bar {
+  width: 100%;
+  max-width: 24px;
+  background: var(--series-1);
+  border-radius: 4px 4px 0 0;
+  opacity: 0.85;
+}
+.tb-bar.on {
+  opacity: 1;
+  outline: 2px solid var(--surface);
+}
+.tb-tip {
+  position: absolute;
+  top: -8px;
+  transform: translate(-50%, -100%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  border-radius: 8px;
+  padding: 6px 10px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 5;
+}
+.tb-x {
+  grid-column: 2;
+  display: flex;
+  justify-content: space-between;
+  padding-top: 6px;
+}
+.hb {
+  display: grid;
+  grid-template-columns: minmax(90px, max-content) 1fr auto;
+  gap: 8px 12px;
+  align-items: center;
+}
+.hb-row {
+  display: contents;
+}
+.hb-track {
+  height: 10px;
+  background: var(--surface-3);
+  border-radius: 5px;
+  overflow: hidden;
+  display: block;
+}
+.hb-bar {
+  display: block;
+  height: 100%;
+  background: var(--series-1, #2a78d6);
+  border-radius: 0 4px 4px 0;
+}
+.hb-value {
+  text-align: right;
+}
