@@ -18,6 +18,7 @@ import {
   revokeUserSessions,
 } from "../lib/auth.ts";
 import type { RoleKey } from "../lib/permissions.ts";
+import { attachReferral } from "../lib/credits.ts";
 
 const LOCK_AFTER = 8;
 const LOCK_MINUTES = 15;
@@ -88,6 +89,7 @@ export const authRoutes = new Hono<AppEnv>()
         password: newPassword,
         acceptTerms: z.literal(true, { errorMap: () => ({ message: "Please accept the terms to continue." }) }),
         marketingOptIn: z.boolean().default(false),
+        referralCode: z.string().trim().max(20).optional().nullable(),
       }),
     );
     if (input.password.toLowerCase().includes(input.email.split("@")[0])) throw badRequest("Your password must not contain your email name.");
@@ -105,6 +107,7 @@ export const authRoutes = new Hono<AppEnv>()
       ]);
       // Public registration only ever creates customers.
       grantRole(db, lastId, "customer", null);
+      attachReferral(db, lastId, input.referralCode);
       sendVerification(db, lastId, input.email);
       audit(db, { actorId: lastId, action: "auth.register", entityType: "user", entityId: lastId, ip: c.get("ip") });
       return lastId;

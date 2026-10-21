@@ -101,6 +101,9 @@ const SECTIONS: { key: string; label: string; settingKeys: string[] }[] = [
   { key: "tax", label: "Tax", settingKeys: ["tax"] },
   { key: "delivery", label: "Delivery", settingKeys: ["delivery"] },
   { key: "returns", label: "Returns & reviews", settingKeys: ["returns", "reviews"] },
+  { key: "rewards", label: "Loyalty & referrals", settingKeys: ["loyalty", "referrals", "giftCards"] },
+  { key: "messaging", label: "SMS & WhatsApp", settingKeys: ["messaging"] },
+  { key: "courier", label: "Courier", settingKeys: ["courier"] },
   { key: "features", label: "Features", settingKeys: ["features"] },
   { key: "maintenance", label: "Maintenance", settingKeys: ["maintenance"] },
   { key: "integrations", label: "Integrations", settingKeys: [] },
@@ -275,6 +278,60 @@ export function SettingsPages() {
           {flag("features", "wishlist", "Wishlist")}
           {flag("features", "reviews", "Customer reviews")}
           {flag("features", "coupons", "Coupons at checkout")}
+          {flag("features", "assistant", "AI shopping assistant", data.integrations.assistant ? "Uses Claude through your Anthropic API key." : "Needs ANTHROPIC_API_KEY on the server.")}
+          {flag("features", "viewer3d", "3D product viewer and AR")}
+        </Section>
+      );
+      break;
+    case "rewards":
+      body = (
+        <Section title="Loyalty, referrals & gift cards" description="Points are earned when an order is delivered and taken back for returned items." {...common}>
+          {flag("loyalty", "enabled", "Loyalty points")}
+          <div className="grid" style={{ "--min": "200px" } as React.CSSProperties}>
+            <TextField label="Points per ₹100 spent" {...num("loyalty", "pointsPerHundredRupees")} />
+            <TextField label="Value of 1 point (₹)" type="number" min={0.01} step={0.01} value={draft.loyalty.pointValuePaise / 100} onChange={(e) => setK("loyalty", { pointValuePaise: Math.round(Number(e.target.value) * 100) })} />
+            <TextField label="Max % of an order payable with points" {...num("loyalty", "maxRedeemPercent")} />
+          </div>
+          <p className="tiny muted">
+            Effective reward rate: {((draft.loyalty.pointsPerHundredRupees * draft.loyalty.pointValuePaise) / 100).toFixed(2)}% back.
+          </p>
+          {flag("referrals", "enabled", "Referral programme")}
+          <div className="grid" style={{ "--min": "200px" } as React.CSSProperties}>
+            <TextField label="Points for the referrer" {...num("referrals", "referrerPoints")} />
+            <TextField label="Points for the new customer" {...num("referrals", "refereePoints")} />
+          </div>
+          <p className="tiny muted">Referral points are awarded when the new customer's first order is delivered, so cancelled or fake orders earn nothing.</p>
+          {flag("giftCards", "enabled", "Accept gift cards at checkout")}
+        </Section>
+      );
+      break;
+    case "messaging":
+      body = (
+        <Section title="SMS & WhatsApp" description="Sent only to customers who opt in from their account settings." {...common}>
+          {flag("messaging", "orderPlaced", "Order confirmed")}
+          {flag("messaging", "outForDelivery", "Out for delivery (includes the delivery code)")}
+          {flag("messaging", "delivered", "Delivered")}
+          {flag("messaging", "preferWhatsApp", "Prefer WhatsApp when a customer allows both")}
+          <div className="alert alert-info">
+            SMS: {data.integrations.sms ? "configured" : "not configured"} · WhatsApp: {data.integrations.whatsapp ? "configured" : "not configured"} (Twilio). Indian SMS needs DLT-registered templates, and
+            WhatsApp business messages need approved templates — see docs/INTEGRATIONS.md.
+          </div>
+        </Section>
+      );
+      break;
+    case "courier":
+      body = (
+        <Section title="Courier (Shiprocket)" description="Used when a store books a courier for an order instead of a CrownCart delivery partner." {...common}>
+          <TextField label="Pickup location name" {...text("courier", "pickupLocation")} hint="Must match a pickup address name in your Shiprocket account exactly." />
+          <div className="grid" style={{ "--min": "160px" } as React.CSSProperties}>
+            <TextField label="Default weight (kg)" type="number" step={0.05} value={draft.courier.defaultWeightKg} onChange={(e) => setK("courier", { defaultWeightKg: Number(e.target.value) })} />
+            <TextField label="Length (cm)" {...num("courier", "lengthCm")} />
+            <TextField label="Breadth (cm)" {...num("courier", "breadthCm")} />
+            <TextField label="Height (cm)" {...num("courier", "heightCm")} />
+          </div>
+          <div className="alert alert-info">
+            Shiprocket: {data.integrations.courier ? "configured" : "not configured"} · tracking webhook: {data.integrations.courierWebhook ? "configured" : "not configured"}.
+          </div>
         </Section>
       );
       break;
@@ -521,6 +578,138 @@ export function CategoriesAdmin() {
           </form>
         </Modal>
       )}
+    </div>
+  );
+}
+
+// ──────────────────────────────── Gift cards ────────────────────────────────
+
+export function GiftCardsAdmin() {
+  const { data, reload } = useApi<{ giftCards: any[] }>("/admin/gift-cards");
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [issued, setIssued] = useState<string | null>(null);
+  const [f, setF] = useState({ amount: "", email: "", expires: "", note: "" });
+  return (
+    <div className="stack">
+      <PageHead title="Gift cards" actions={<button className="btn" onClick={() => (setIssued(null), setOpen(true))}>+ Issue gift card</button>} />
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th className="r">Value</th>
+              <th className="r">Balance</th>
+              <th>Recipient</th>
+              <th>Expires</th>
+              <th>Issued</th>
+              <th>Active</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data?.giftCards.map((g) => (
+              <tr key={g.id}>
+                <td>
+                  <code>{g.code}</code>
+                  {g.note && <div className="tiny muted">{g.note}</div>}
+                </td>
+                <td className="r num">{inr(g.initial_paise)}</td>
+                <td className="r num">{inr(g.balance_paise)}</td>
+                <td className="small">{g.recipient_email ?? "—"}</td>
+                <td className="small">{g.expires_at ? date(g.expires_at) : "Never"}</td>
+                <td className="small">
+                  {date(g.created_at)} · {g.issued_by_name ?? "—"}
+                </td>
+                <td>
+                  <input type="checkbox" aria-label={`${g.code} active`} checked={Boolean(g.is_active)} onChange={(e) => api.patch(`/admin/gift-cards/${g.id}`, { isActive: e.target.checked }).then(reload).catch((err) => toast(errorMessage(err), "error"))} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {open && (
+        <Modal title="Issue a gift card" onClose={() => setOpen(false)}>
+          {issued ? (
+            <div className="stack">
+              <div className="alert alert-success">Gift card created{f.email ? " and emailed" : ""}.</div>
+              <code className="panel" style={{ fontSize: 20, textAlign: "center" }}>
+                {issued}
+              </code>
+              <button className="btn" onClick={() => (setOpen(false), setF({ amount: "", email: "", expires: "", note: "" }))}>
+                Done
+              </button>
+            </div>
+          ) : (
+            <form
+              className="stack"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const r = await api.post<{ code: string }>("/admin/gift-cards", {
+                    amountPaise: Math.round(Number(f.amount) * 100),
+                    recipientEmail: f.email || null,
+                    expiresAt: f.expires ? new Date(`${f.expires}T23:59:59`).toISOString() : null,
+                    note: f.note,
+                  });
+                  setIssued(r.code);
+                  reload();
+                } catch (err) {
+                  toast(errorMessage(err), "error");
+                }
+              }}
+            >
+              <TextField label="Value (₹)" required inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+              <TextField label="Recipient email (optional)" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} hint="We'll email them the code." />
+              <TextField label="Expires (optional)" type="date" value={f.expires} onChange={(e) => setF({ ...f, expires: e.target.value })} />
+              <TextField label="Internal note" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
+              <Button type="submit" disabled={!f.amount}>
+                Issue gift card
+              </Button>
+            </form>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+export function MessagesAdmin() {
+  const { data, error } = useApi<{ messages: any[] }>("/admin/messages");
+  if (error) return <ErrorState error={error} />;
+  return (
+    <div className="stack">
+      <PageHead title="SMS & WhatsApp outbox" />
+      <p className="small muted">Messages to customers who opted in. "Logged" means no provider is configured, so nothing was actually sent.</p>
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Channel</th>
+              <th>To</th>
+              <th>Message</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data?.messages.map((m) => (
+              <tr key={m.id}>
+                <td className="small">{date(m.created_at)}</td>
+                <td>{m.channel === "whatsapp" ? "WhatsApp" : "SMS"}</td>
+                <td className="small">{m.to_phone.replace(/\d(?=\d{4})/g, "•")}</td>
+                <td className="small" style={{ maxWidth: 380 }}>
+                  {m.body}
+                  {m.error && <div className="tiny" style={{ color: "var(--danger)" }}>{m.error}</div>}
+                </td>
+                <td>
+                  <StatusBadge status={m.status === "sent" ? "active" : m.status === "failed" ? "failed" : "pending"} label={m.status} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

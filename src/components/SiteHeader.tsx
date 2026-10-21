@@ -5,6 +5,7 @@ import { homeFor, useAuth } from "../lib/auth";
 import { useTheme, type ThemePref } from "../lib/theme";
 import { inr } from "../lib/format";
 import { Announcement } from "./Announcement";
+import { Assistant } from "./Assistant";
 
 interface Suggest {
   products: { slug: string; name: string; brand: string; image: string; pricePaise: number }[];
@@ -241,6 +242,7 @@ export function StoreLayout({ children }: { children: ReactNode }) {
       <SiteHeader />
       <main id="main">{children}</main>
       <SiteFooter />
+      <Assistant />
     </div>
   );
 }

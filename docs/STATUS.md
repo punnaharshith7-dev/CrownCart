@@ -57,6 +57,13 @@ With no email provider set, emails are printed in the API console and listed at 
 | Razorpay online payments: order creation, signature + amount verification, webhooks, refunds | Built — needs keys (docs/INTEGRATIONS.md) |
 | Google sign-in (OAuth code flow + PKCE, account linking by verified email) | Built — needs keys (docs/INTEGRATIONS.md) |
 | Transactional email via Resend | Built — needs keys (docs/INTEGRATIONS.md) |
+| AI shopping assistant (Claude, read-only catalog tools, rate-limited) | Built — needs ANTHROPIC_API_KEY |
+| 3D product viewer (your 4 .glb models) + Android AR via Scene Viewer | Built — AR needs a public HTTPS domain; iPhone AR needs USDZ files |
+| Loyalty points (earn on delivery, redeem at checkout, reversed on returns and cancellations) | Built |
+| Gift cards (issue, email, partial redemption, refunds back to the card) | Built |
+| Referrals (link and code, rewarded on the new customer's first delivered order) | Built |
+| SMS and WhatsApp order alerts (customer opt-in, Twilio) | Built — needs keys, plus DLT / WhatsApp templates |
+| Courier integration (Shiprocket booking, AWB, label, tracking webhook and sync) | Built — needs keys |
 | Customer account: orders, tracking timeline, cancel, return/exchange, invoices, wishlist, addresses, notifications, support, settings, sessions, delete account | Built |
 | Store portal: dashboard, orders and fulfilment, returns, inventory with movement log, coupons, team invites | Built |
 | Detailed product editing: full variant editor, media alt text / ordering / per-variant images / type, change history, duplicate, bulk CSV price & stock update with preview | Built |
@@ -70,10 +77,9 @@ With no email provider set, emails are printed in the API console and listed at 
 ## Set aside until the owner returns
 
 - Logo/favicon upload and editable email templates (brand settings cover text only).
-- SMS/WhatsApp notifications and courier APIs.
 - Testing and bug fixing (unit, integration, end-to-end, security, accessibility).
-- Advanced features: AI assistant, AR/3D product viewers, exploded views, loyalty, gift cards,
-  referrals, multiple named wishlists.
+- Not built yet: iPhone AR (needs USDZ versions of the models), exploded views, virtual try-on,
+  visual/voice search, multiple named wishlists, buying gift cards online (admins issue them for now).
 - Deployment: hosting, domain, HTTPS, backups, monitoring, CI/CD, PostgreSQL migration.
 
 ## Known limitations

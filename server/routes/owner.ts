@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv, Ctx } from "../context.ts";
 import type { Db } from "../db.ts";
-import { config } from "../config.ts";
+import { config, integrations } from "../config.ts";
+import { bookCourier, syncTracking } from "../lib/courier.ts";
 import { badRequest, conflict, notFound } from "../lib/errors.ts";
 import { body, email, id } from "../lib/validate.ts";
 import { requireStore, requireUser, storeRolesFor } from "../lib/auth.ts";
@@ -13,6 +14,7 @@ import { ORDER_STATUS_LABELS, restockVariant, transitionOrder, type OrderStatus 
 import { cancelAndRefund, startRefund } from "../lib/payments.ts";
 import { approvedPartners, assignPartner, createShipment } from "../lib/fulfilment.ts";
 import { saveUpload } from "../lib/uploads.ts";
+import { splitRefund } from "../lib/credits.ts";
 import { randomToken, sha256 } from "../lib/crypto.ts";
 import { MEMBER_ROLES } from "../lib/permissions.ts";
 import { ORDER_LIST_SQL, invoiceHtml, orderDetail, orderSummary } from "./orders.ts";
@@ -505,6 +507,8 @@ export const ownerRoutes = new Hono<AppEnv>()
         cancel: ["confirmed", "processing", "ready_for_dispatch", "cancellation_requested"].includes(o.status),
         approveCancellation: o.status === "cancellation_requested",
         createShipment: o.status === "ready_for_dispatch",
+        courier: o.status === "ready_for_dispatch" && integrations().courier && !db.get("SELECT 1 FROM shipments WHERE order_id = ? AND carrier = 'shiprocket'", [o.id]),
+        courierConfigured: integrations().courier,
       },
       partners: o.status === "ready_for_dispatch" || o.status === "shipped" ? approvedPartners(db).map((p) => ({ id: p.id, name: p.name, availability: p.availability, openAssignments: p.open_assignments })) : [],
     });
@@ -560,6 +564,26 @@ export const ownerRoutes = new Hono<AppEnv>()
     return c.json({ order: orderDetail(db, db.get("SELECT * FROM orders WHERE id = ?", [o.id])!, "store") });
   })
 
+  .post("/stores/:storeId/orders/:number/courier", async (c) => {
+    const storeId = sid(c);
+    const u = requireStore(c, storeId, "store.orders");
+    const db = c.get("db");
+    const o = storeOrder(db, storeId, c.req.param("number"));
+    const awb = await bookCourier(db, o.id, u.id);
+    return c.json({ awb, order: orderDetail(db, db.get("SELECT * FROM orders WHERE id = ?", [o.id])!, "store") });
+  })
+
+  .post("/stores/:storeId/orders/:number/courier/sync", async (c) => {
+    const storeId = sid(c);
+    requireStore(c, storeId, "store.orders");
+    const db = c.get("db");
+    const o = storeOrder(db, storeId, c.req.param("number"));
+    const sh = db.get("SELECT id FROM shipments WHERE order_id = ? AND carrier = 'shiprocket'", [o.id]);
+    if (!sh) throw notFound("No courier shipment on this order.");
+    const status = await syncTracking(db, sh.id);
+    return c.json({ status, order: orderDetail(db, db.get("SELECT * FROM orders WHERE id = ?", [o.id])!, "store") });
+  })
+
   .post("/stores/:storeId/returns/:returnId", async (c) => {
     const storeId = sid(c);
     const u = requireStore(c, storeId, "store.orders");
@@ -600,6 +624,8 @@ export const ownerRoutes = new Hono<AppEnv>()
         const itemsTotal = items.reduce((s, it) => s + it.unit_price_paise * it.quantity, 0);
         // Discounts are returned proportionally; shipping is not refunded on returns.
         refundAmount = itemsTotal - Math.round((o.discount_paise * itemsTotal) / Math.max(o.subtotal_paise, 1));
+        // Whatever was paid with points or a gift card goes back there; only the money part goes to the provider.
+        refundAmount = splitRefund(db, r.oid, refundAmount);
       }
       audit(db, { actorId: u.id, action: `return.${input.action}`, entityType: "return", entityId: r.id, storeId, details: { note: input.note } });
     });

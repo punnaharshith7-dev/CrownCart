@@ -15,6 +15,8 @@ import { allSettings, setSetting, SETTING_DEFAULTS, type SettingKey } from "../l
 import { randomToken, sha256 } from "../lib/crypto.ts";
 import { ROLES, type RoleKey } from "../lib/permissions.ts";
 import { grantRole } from "./auth.ts";
+import { addPoints, newGiftCardCode, pointsBalance } from "../lib/credits.ts";
+import { bookCourier, syncTracking } from "../lib/courier.ts";
 import { ORDER_LIST_SQL, invoiceHtml, orderDetail, orderSummary } from "./orders.ts";
 import { couponSchema, slugify } from "./owner.ts";
 
@@ -52,7 +54,18 @@ const settingSchemas: Record<SettingKey, z.ZodTypeAny> = {
   returns: z.object({ enabled: z.boolean() }),
   reviews: z.object({ requireModeration: z.boolean(), verifiedPurchaseOnly: z.boolean() }),
   maintenance: z.object({ enabled: z.boolean(), message: z.string().trim().max(300) }),
-  features: z.object({ wishlist: z.boolean(), reviews: z.boolean(), coupons: z.boolean() }),
+  features: z.object({ wishlist: z.boolean(), reviews: z.boolean(), coupons: z.boolean(), assistant: z.boolean(), viewer3d: z.boolean() }),
+  loyalty: z.object({ enabled: z.boolean(), pointsPerHundredRupees: z.number().int().min(0).max(100), pointValuePaise: z.number().int().min(1).max(10_000), maxRedeemPercent: z.number().int().min(0).max(100) }),
+  referrals: z.object({ enabled: z.boolean(), referrerPoints: z.number().int().min(0).max(100_000), refereePoints: z.number().int().min(0).max(100_000) }),
+  giftCards: z.object({ enabled: z.boolean() }),
+  messaging: z.object({ orderPlaced: z.boolean(), outForDelivery: z.boolean(), delivered: z.boolean(), preferWhatsApp: z.boolean() }),
+  courier: z.object({
+    pickupLocation: z.string().trim().min(1).max(60),
+    defaultWeightKg: z.number().min(0.05).max(100),
+    lengthCm: z.number().min(1).max(300),
+    breadthCm: z.number().min(1).max(300),
+    heightCm: z.number().min(1).max(300),
+  }),
 };
 
 function adminCount(c: Ctx) {
@@ -498,6 +511,23 @@ export const adminRoutes = new Hono<AppEnv>()
     return c.json({ ok: true });
   })
 
+  .post("/orders/:number/courier", async (c) => {
+    const admin = requireAdmin(c, "admin.delivery");
+    const db = c.get("db");
+    const o = db.get("SELECT * FROM orders WHERE number = ?", [c.req.param("number")]);
+    if (!o) throw notFound();
+    return c.json({ awb: await bookCourier(db, o.id, admin.id) });
+  })
+
+  .post("/orders/:number/courier/sync", async (c) => {
+    requireAdmin(c, "admin.delivery");
+    const db = c.get("db");
+    const o = db.get("SELECT * FROM orders WHERE number = ?", [c.req.param("number")]);
+    const sh = o && db.get("SELECT id FROM shipments WHERE order_id = ? AND carrier = 'shiprocket'", [o.id]);
+    if (!sh) throw notFound("No courier shipment on this order.");
+    return c.json({ status: await syncTracking(db, sh.id) });
+  })
+
   .post("/orders/:number/status", async (c) => {
     const admin = requireAdmin(c, "admin.orders");
     const input = await body(c, z.object({ to: z.enum(["processing", "ready_for_dispatch", "confirmed"]), note: z.string().trim().min(3).max(300) }));
@@ -657,6 +687,83 @@ export const adminRoutes = new Hono<AppEnv>()
     if (!db.run("UPDATE coupons SET is_active = ? WHERE id = ?", [isActive ? 1 : 0, Number(c.req.param("id"))]).changes) throw notFound();
     audit(db, { actorId: admin.id, action: isActive ? "coupon.activated" : "coupon.deactivated", entityType: "coupon", entityId: c.req.param("id") });
     return c.json({ ok: true });
+  })
+
+  // ── Gift cards & loyalty ──
+  .get("/gift-cards", (c) => {
+    requireAdmin(c, "admin.finance");
+    return c.json({
+      giftCards: c.get("db").all(
+        `SELECT g.*, u.name AS issued_by_name, (SELECT COUNT(*) FROM gift_card_transactions t WHERE t.gift_card_id = g.id AND t.reason = 'redeemed') AS uses
+           FROM gift_cards g LEFT JOIN users u ON u.id = g.issued_by ORDER BY g.id DESC LIMIT 300`,
+      ),
+    });
+  })
+
+  .post("/gift-cards", async (c) => {
+    const admin = requireAdmin(c, "admin.finance");
+    const input = await body(
+      c,
+      z.object({
+        amountPaise: z.number().int().min(100).max(10_000_000),
+        recipientEmail: email.optional().nullable(),
+        expiresAt: z.string().datetime().optional().nullable(),
+        note: z.string().trim().max(200).default(""),
+      }),
+    );
+    const db = c.get("db");
+    const code = newGiftCardCode(db);
+    db.tx(() => {
+      const gid = db.run("INSERT INTO gift_cards (code, initial_paise, balance_paise, issued_by, recipient_email, note, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)", [
+        code,
+        input.amountPaise,
+        input.amountPaise,
+        admin.id,
+        input.recipientEmail ?? null,
+        input.note,
+        input.expiresAt ?? null,
+      ]).lastId;
+      db.run("INSERT INTO gift_card_transactions (gift_card_id, delta_paise, reason, actor_user_id) VALUES (?, ?, 'issued', ?)", [gid, input.amountPaise, admin.id]);
+      if (input.recipientEmail) {
+        const amount = (input.amountPaise / 100).toLocaleString("en-IN");
+        const validity = input.expiresAt ? `\n\nValid until ${new Date(input.expiresAt).toLocaleDateString("en-IN")}.` : "";
+        sendEmail(db, input.recipientEmail, "You have a CrownCart gift card", `You've received a CrownCart gift card worth ₹${amount}.\n\nCode: ${code}\n\nEnter it at checkout: ${config.publicUrl}/shop${validity}`);
+      }
+      audit(db, { actorId: admin.id, action: "giftcard.issued", entityType: "gift_card", entityId: gid, details: { amountPaise: input.amountPaise, recipientEmail: input.recipientEmail ?? null }, ip: c.get("ip") });
+    });
+    return c.json({ code }, 201);
+  })
+
+  .patch("/gift-cards/:id", async (c) => {
+    const admin = requireAdmin(c, "admin.finance");
+    const { isActive } = await body(c, z.object({ isActive: z.boolean() }));
+    const db = c.get("db");
+    if (!db.run("UPDATE gift_cards SET is_active = ? WHERE id = ?", [isActive ? 1 : 0, Number(c.req.param("id"))]).changes) throw notFound();
+    audit(db, { actorId: admin.id, action: isActive ? "giftcard.activated" : "giftcard.deactivated", entityType: "gift_card", entityId: c.req.param("id") });
+    return c.json({ ok: true });
+  })
+
+  .post("/users/:id/points", async (c) => {
+    const admin = requireAdmin(c, "admin.finance");
+    const input = await body(
+      c,
+      z.object({ delta: z.number().int().min(-1_000_000).max(1_000_000).refine((d) => d !== 0, "Enter a non-zero number."), reason: z.string().trim().min(3).max(200) }),
+    );
+    const db = c.get("db");
+    const target = Number(c.req.param("id"));
+    if (!db.get("SELECT 1 FROM users WHERE id = ?", [target])) throw notFound();
+    if (input.delta < 0 && pointsBalance(db, target) + input.delta < 0) throw conflict("That would make the points balance negative.");
+    db.tx(() => {
+      addPoints(db, target, input.delta, "admin_adjustment", "admin", `${admin.id}:${Date.now()}`);
+      audit(db, { actorId: admin.id, action: "loyalty.adjusted", entityType: "user", entityId: target, details: input, ip: c.get("ip") });
+      notify(db, target, { type: "loyalty.adjusted", title: `${input.delta > 0 ? "+" : ""}${input.delta} CrownCart points`, body: input.reason, link: "/account/rewards" });
+    });
+    return c.json({ balance: pointsBalance(db, target) });
+  })
+
+  .get("/messages", (c) => {
+    requireAdmin(c, "admin.support");
+    return c.json({ messages: c.get("db").all("SELECT id, channel, to_phone, body, status, error, created_at FROM message_outbox ORDER BY id DESC LIMIT 100") });
   })
 
   // ── Reports ──

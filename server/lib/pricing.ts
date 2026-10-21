@@ -1,5 +1,6 @@
 import type { Db, Row } from "../db.ts";
 import { getSetting } from "./settings.ts";
+import { findGiftCard, pointsBalance } from "./credits.ts";
 
 export interface CartLine {
   itemId: number;
@@ -33,6 +34,11 @@ export interface StoreGroup {
   shippingPaise: number;
   taxPaise: number;
   totalPaise: number;
+  /** Store credit applied to this store order, and the money left to pay. */
+  pointsUsed: number;
+  pointsPaise: number;
+  giftCardPaise: number;
+  payablePaise: number;
 }
 
 export interface CartSummary {
@@ -50,6 +56,11 @@ export interface CartSummary {
   freeShippingThresholdPaise: number;
   checkoutBlocked: boolean;
   taxNote: string;
+  /** Money to pay after points and gift card (totalPaise is before them). */
+  payablePaise: number;
+  loyalty: { enabled: boolean; balance: number; maxUsable: number; pointValuePaise: number; applied: number; appliedPaise: number };
+  giftCard: { code: string; balancePaise: number; appliedPaise: number } | null;
+  giftCardError: string | null;
 }
 
 export function loadCartLines(db: Db, userId: number): CartLine[] {
@@ -162,7 +173,7 @@ export function shippingFor(db: Db, subtotalAfterDiscount: number): number {
 }
 
 /** Authoritative cart totals. The browser's numbers are never used. */
-export function summarizeCart(db: Db, userId: number, couponCode?: string | null): CartSummary {
+export function summarizeCart(db: Db, userId: number, couponCode?: string | null, credit: { points?: number; giftCardCode?: string | null } = {}): CartSummary {
   const all = loadCartLines(db, userId);
   const lines = all.filter((l) => !l.savedForLater);
   const saved = all.filter((l) => l.savedForLater);
@@ -181,7 +192,7 @@ export function summarizeCart(db: Db, userId: number, couponCode?: string | null
   for (const l of lines) {
     let g = byStore.get(l.storeId);
     if (!g) {
-      g = { storeId: l.storeId, storeName: l.storeName, lines: [], subtotalPaise: 0, discountPaise: 0, shippingPaise: 0, taxPaise: 0, totalPaise: 0 };
+      g = { storeId: l.storeId, storeName: l.storeName, lines: [], subtotalPaise: 0, discountPaise: 0, shippingPaise: 0, taxPaise: 0, totalPaise: 0, pointsUsed: 0, pointsPaise: 0, giftCardPaise: 0, payablePaise: 0 };
       byStore.set(l.storeId, g);
     }
     g.lines.push(l);
@@ -212,8 +223,45 @@ export function summarizeCart(db: Db, userId: number, couponCode?: string | null
     g.totalPaise = g.subtotalPaise - g.discountPaise + g.shippingPaise + g.taxPaise;
   }
 
-  const sum = (k: keyof Pick<StoreGroup, "subtotalPaise" | "discountPaise" | "shippingPaise" | "taxPaise" | "totalPaise">) =>
+  const sum = (k: keyof Pick<StoreGroup, "subtotalPaise" | "discountPaise" | "shippingPaise" | "taxPaise" | "totalPaise" | "pointsPaise" | "giftCardPaise" | "payablePaise">) =>
     groups.reduce((s, g) => s + g[k], 0);
+  const grandTotal = sum("totalPaise");
+
+  // ── Store credit: points first (capped by the redemption limit), then a gift card. ──
+  const lp = getSetting(db, "loyalty");
+  const balance = lp.enabled ? Math.max(0, pointsBalance(db, userId)) : 0;
+  const maxUsable = lp.enabled ? Math.min(balance, Math.floor((grandTotal * lp.maxRedeemPercent) / 100 / lp.pointValuePaise)) : 0;
+  const pointsApplied = Math.max(0, Math.min(Math.floor(credit.points ?? 0), maxUsable));
+  const pointsPaise = pointsApplied * lp.pointValuePaise;
+  let giftCard: CartSummary["giftCard"] = null;
+  let giftCardError: string | null = null;
+  let gcPaise = 0;
+  if (credit.giftCardCode) {
+    const found = findGiftCard(db, credit.giftCardCode);
+    if ("error" in found) giftCardError = found.error;
+    else {
+      gcPaise = Math.min(found.card.balance_paise, grandTotal - pointsPaise);
+      giftCard = { code: found.card.code, balancePaise: found.card.balance_paise, appliedPaise: gcPaise };
+    }
+  }
+  // Spread both across store orders in proportion to their totals (last group takes the remainder).
+  const spread = (amount: number, key: "pointsPaise" | "giftCardPaise") => {
+    let left = amount;
+    groups.forEach((g, i) => {
+      const share = i === groups.length - 1 ? left : Math.floor((amount * g.totalPaise) / Math.max(grandTotal, 1));
+      g[key] = Math.min(share, g.totalPaise - (key === "giftCardPaise" ? g.pointsPaise : 0));
+      left -= g[key];
+    });
+  };
+  spread(pointsPaise, "pointsPaise");
+  spread(gcPaise, "giftCardPaise");
+  let ptsLeft = pointsApplied;
+  groups.forEach((g, i) => {
+    g.pointsUsed = i === groups.length - 1 ? ptsLeft : Math.round(g.pointsPaise / lp.pointValuePaise);
+    ptsLeft -= g.pointsUsed;
+    g.payablePaise = g.totalPaise - g.pointsPaise - g.giftCardPaise;
+  });
+  if (giftCard) giftCard.appliedPaise = sum("giftCardPaise");
 
   return {
     lines,
@@ -230,5 +278,9 @@ export function summarizeCart(db: Db, userId: number, couponCode?: string | null
     freeShippingThresholdPaise: getSetting(db, "shipping").freeThresholdPaise,
     checkoutBlocked: lines.length === 0 || lines.some((l) => l.issue !== null),
     taxNote: getSetting(db, "tax").note,
+    payablePaise: sum("payablePaise"),
+    loyalty: { enabled: lp.enabled, balance, maxUsable, pointValuePaise: lp.pointValuePaise, applied: pointsApplied, appliedPaise: pointsPaise },
+    giftCard,
+    giftCardError,
   };
 }

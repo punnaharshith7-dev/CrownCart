@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { StoreLayout } from "../../components/SiteHeader";
 import { ProductCard, type Card } from "../../components/ProductCard";
@@ -8,6 +8,9 @@ import { useAuth } from "../../lib/auth";
 import { date, inr } from "../../lib/format";
 import { useToast } from "../../lib/toast";
 import { useApi, useTitle } from "../../lib/useApi";
+
+// The 3D viewer (and its WebGL code) loads only when a shopper opens it.
+const ProductViewer3D = lazy(() => import("../../components/ProductViewer3D"));
 
 interface Variant {
   id: number;
@@ -132,6 +135,7 @@ export default function Product() {
   const [pincode, setPincode] = useState("");
   const [service, setService] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
+  const [view3d, setView3d] = useState(false);
 
   useTitle(p ? p.seoTitle || p.name : "Product", { description: p?.seoDescription || p?.tagline });
 
@@ -148,6 +152,7 @@ export default function Product() {
   const variant = p?.variants.find((v) => v.id === variantId) ?? null;
   const gallery = useMemo(() => (p ? p.media.filter((m) => m.kind === "image" || m.kind === "hero") : []), [p]);
   const videos = p?.media.filter((m) => m.kind === "video") ?? [];
+  const model = p?.media.find((m) => m.kind === "model");
   const shown = gallery[mediaIdx];
   const needsSize = Boolean(p && p.variants.length > 1);
 
@@ -214,14 +219,28 @@ export default function Product() {
 
         <div className="pdp">
           <section aria-label="Product images">
-            {shown ? (
+            {model && (
+              <div className="row" role="group" aria-label="Gallery view" style={{ marginBottom: 12 }}>
+                <button type="button" className="chip" aria-pressed={!view3d} onClick={() => setView3d(false)}>
+                  Photos
+                </button>
+                <button type="button" className="chip" aria-pressed={view3d} onClick={() => setView3d(true)}>
+                  View in 3D
+                </button>
+              </div>
+            )}
+            {view3d && model ? (
+              <Suspense fallback={<div className="gallery-main"><span className="small muted">Loading 3D viewer…</span></div>}>
+                <ProductViewer3D url={model.url} title={p.name} />
+              </Suspense>
+            ) : shown ? (
               <button type="button" className={`gallery-main${shown.kind === "hero" ? " hero" : ""}`} onClick={() => setLightbox(true)} aria-label="Open full-screen image" style={{ width: "100%", padding: 0 }}>
                 <img src={shown.url} alt={shown.alt || p.name} />
               </button>
             ) : (
               <div className="gallery-main">No image available</div>
             )}
-            {gallery.length > 1 && (
+            {!view3d && gallery.length > 1 && (
               <div className="thumbs" role="group" aria-label="Choose image">
                 {gallery.map((m, i) => (
                   <button key={m.id} type="button" aria-pressed={i === mediaIdx} aria-label={`Image ${i + 1}`} onClick={() => setMediaIdx(i)}>

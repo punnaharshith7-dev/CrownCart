@@ -10,6 +10,8 @@ import { audit } from "../lib/audit.ts";
 import { verifyPassword } from "../lib/crypto.ts";
 import { toCard } from "./catalog.ts";
 import { getSetting } from "../lib/settings.ts";
+import { findGiftCard, pointsBalance, referralCodeFor } from "../lib/credits.ts";
+import { rateLimit } from "../lib/rate-limit.ts";
 
 interface VariantCheck {
   id: number;
@@ -262,6 +264,8 @@ export const accountRoutes = new Hono<AppEnv>()
           orderEmails: z.boolean(),
           priceDropAlerts: z.boolean(),
           backInStockAlerts: z.boolean(),
+          smsAlerts: z.boolean(),
+          whatsappAlerts: z.boolean(),
           language: z.enum(["en-IN"]),
           currency: z.enum(["INR"]),
         })
@@ -364,6 +368,30 @@ export const accountRoutes = new Hono<AppEnv>()
       [u.id],
     );
     return c.json({ items: rows.map((r) => ({ slug: r.slug, name: r.name, image: r.image, pricePaise: r.price_paise })) });
+  })
+
+  .get("/rewards", (c) => {
+    const u = requireUser(c);
+    const db = c.get("db");
+    const loyalty = getSetting(db, "loyalty");
+    const referrals = getSetting(db, "referrals");
+    const code = referralCodeFor(db, u.id);
+    const ledger = db.all("SELECT delta, reason, ref_type, ref_id, created_at FROM loyalty_ledger WHERE user_id = ? ORDER BY id DESC LIMIT 100", [u.id]);
+    const refs = db.get("SELECT COUNT(*) total, SUM(status = 'rewarded') rewarded FROM referrals WHERE referrer_id = ?", [u.id])!;
+    return c.json({
+      balance: pointsBalance(db, u.id),
+      loyalty,
+      ledger,
+      referral: { enabled: referrals.enabled, code, referrerPoints: referrals.referrerPoints, refereePoints: referrals.refereePoints, invited: refs.total ?? 0, rewarded: refs.rewarded ?? 0 },
+    });
+  })
+
+  .get("/gift-cards/:code", (c) => {
+    const u = requireUser(c);
+    rateLimit(`giftcard-check:${u.id}`, 10, 600_000);
+    const found = findGiftCard(c.get("db"), c.req.param("code"));
+    if ("error" in found) throw badRequest(found.error);
+    return c.json({ code: found.card.code, balancePaise: found.card.balance_paise, expiresAt: found.card.expires_at });
   })
 
   .post("/stock-alerts", async (c) => {

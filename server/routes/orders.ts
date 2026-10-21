@@ -56,12 +56,24 @@ export function orderDetail(db: Db, order: Row, audience: "customer" | "store" |
     const events = assignment
       ? db.all("SELECT to_status, reason, created_at FROM delivery_status_history WHERE assignment_id IN (SELECT id FROM delivery_assignments WHERE shipment_id = ?) ORDER BY id", [s.id])
       : [];
+    const courierEvents =
+      s.carrier === "shiprocket"
+        ? db.all("SELECT status, description, location, occurred_at FROM shipment_events WHERE shipment_id = ? ORDER BY occurred_at", [s.id]).map((e) => ({
+            status: e.status,
+            label: e.status,
+            reason: [e.description, e.location].filter(Boolean).join(" · "),
+            at: e.occurred_at,
+          }))
+        : [];
     const pod = assignment ? db.get("SELECT recipient_name, otp_verified, delivered_at, notes FROM proof_of_delivery WHERE assignment_id = ?", [assignment.id]) : null;
     return {
       id: s.id,
       kind: s.kind,
       trackingNumber: s.tracking_number,
       carrier: s.carrier,
+      courierName: s.courier_name,
+      labelUrl: audience === "customer" ? null : s.label_url,
+      trackingUrl: s.carrier === "shiprocket" ? `https://shiprocket.co/tracking/${encodeURIComponent(s.tracking_number)}` : null,
       status: s.status,
       partner: assignment
         ? {
@@ -72,7 +84,7 @@ export function orderDetail(db: Db, order: Row, audience: "customer" | "store" |
             failureReason: assignment.failure_reason,
           }
         : null,
-      events: events.map((e) => ({ status: e.to_status, label: DELIVERY_STATUS_LABELS[e.to_status as DeliveryStatus], reason: e.reason, at: e.created_at })),
+      events: [...events.map((e) => ({ status: e.to_status, label: DELIVERY_STATUS_LABELS[e.to_status as DeliveryStatus], reason: e.reason, at: e.created_at })), ...courierEvents],
       proof: pod ? { recipientName: pod.recipient_name, otpVerified: Boolean(pod.otp_verified), deliveredAt: pod.delivered_at, notes: audience === "customer" ? "" : pod.notes } : null,
     };
   });
@@ -115,6 +127,9 @@ export function orderDetail(db: Db, order: Row, audience: "customer" | "store" |
     shippingPaise: order.shipping_paise,
     taxPaise: order.tax_paise,
     refundedPaise: order.refunded_paise,
+    pointsUsed: order.points_used,
+    pointsPaise: order.points_paise,
+    giftCardPaise: order.gift_card_paise,
     couponCode: order.coupon_code,
     deliveredAt: order.delivered_at,
     shippingAddress: {

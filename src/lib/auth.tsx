@@ -42,7 +42,7 @@ interface AuthState {
   refresh: () => Promise<void>;
   setCartCount: (n: number) => void;
   signIn: (email: string, password: string) => Promise<Me>;
-  register: (input: { name: string; email: string; password: string; acceptTerms: boolean; marketingOptIn: boolean }) => Promise<Me>;
+  register: (input: { name: string; email: string; password: string; acceptTerms: boolean; marketingOptIn: boolean; referralCode?: string | null }) => Promise<Me>;
   signOut: () => Promise<void>;
   /** Adds to the bag, sending a signed-out visitor to Sign In first and finishing the add afterwards. */
   addToCart: (variantId: number, quantity: number, opts?: { productName?: string; returnTo?: string }) => Promise<boolean>;
@@ -147,7 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const register = useCallback(
-    async (input: { name: string; email: string; password: string; acceptTerms: boolean; marketingOptIn: boolean }) => {
+    async (input: { name: string; email: string; password: string; acceptTerms: boolean; marketingOptIn: boolean; referralCode?: string | null }) => {
       const r = await api.post<{ user: Me }>("/auth/register", input);
       await refresh();
       await replayPending();

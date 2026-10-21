@@ -9,7 +9,7 @@ import { useToast } from "../../lib/toast";
 import { useApi } from "../../lib/useApi";
 import { OrderLines, OrderTimeline, ShipmentTracking, type OrderDetail } from "../account/Account";
 import { formatAddress } from "../../components/AddressForm";
-import { AdminReports, CategoriesAdmin, CouponsAdmin, SettingsPages } from "./AdminExtras";
+import { AdminReports, CategoriesAdmin, CouponsAdmin, GiftCardsAdmin, MessagesAdmin, SettingsPages } from "./AdminExtras";
 
 function useAction() {
   const toast = useToast();
@@ -314,6 +314,25 @@ function UserView() {
           {data.stores.length > 0 && <div className="small">Stores: {data.stores.map((s: any) => `${s.name} (${titleCase(s.member_role)})`).join(", ")}</div>}
         </section>
         <section className="card stack">
+          <h2 className="h3">Loyalty points</h2>
+          <form
+            className="row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget);
+              const delta = Number(fd.get("delta"));
+              const reason = String(fd.get("reason") ?? "");
+              run(() => api.post(`/admin/users/${u.id}/points`, { delta, reason }), "Points updated.", () => (e.target as HTMLFormElement).reset());
+            }}
+          >
+            <input name="delta" className="input" style={{ width: 110 }} inputMode="numeric" placeholder="+100 / -50" aria-label="Points to add or remove" required />
+            <input name="reason" className="input" style={{ flex: 1, minWidth: 160 }} placeholder="Reason (shown to the customer)" aria-label="Reason" required minLength={3} />
+            <Button type="submit" className="btn-outline btn-sm" loading={busy}>
+              Adjust
+            </Button>
+          </form>
+        </section>
+        <section className="card stack">
           <h2 className="h3">Recent orders</h2>
           {data.orders.length ? data.orders.map((o: any) => <Link key={o.number} to={`/admin/orders/${o.number}`} className="spread small"><span>{o.number}</span><span><StatusBadge status={o.status} label={o.statusLabel} /> {inr(o.totalPaise)}</span></Link>) : <p className="small muted">No orders.</p>}
         </section>
@@ -590,6 +609,16 @@ function OrderView() {
               Assign
             </Button>
           </form>
+        )}
+        {o.status === "ready_for_dispatch" && !o.shipments.some((s) => s.carrier === "shiprocket") && (
+          <Button className="btn-outline" loading={busy} onClick={() => run(() => api.post(`/admin/orders/${o.number}/courier`), "Courier booked.", reload)}>
+            Book courier
+          </Button>
+        )}
+        {o.shipments.some((s) => s.carrier === "shiprocket") && (
+          <Button className="btn-ghost" loading={busy} onClick={() => run(() => api.post(`/admin/orders/${o.number}/courier/sync`), "Tracking refreshed.", reload)}>
+            Refresh courier tracking
+          </Button>
         )}
         <button className="btn btn-outline" onClick={() => setRefund(true)}>
           Issue refund
@@ -999,6 +1028,8 @@ export default function Admin() {
     has("admin.support") && { to: "/admin/reviews", label: "Reviews" },
     has("admin.support") && { to: "/admin/support", label: "Support" },
     has("admin.settings") && { to: "/admin/coupons", label: "Coupons" },
+    has("admin.finance") && { to: "/admin/gift-cards", label: "Gift cards" },
+    has("admin.support") && { to: "/admin/messages", label: "SMS & WhatsApp" },
     has("admin.settings") && { to: "/admin/settings", label: "Settings" },
     has("admin.audit") && { to: "/admin/audit", label: "Audit log" },
     has("admin.settings") && { to: "/admin/emails", label: "Email outbox" },
@@ -1022,6 +1053,8 @@ export default function Admin() {
         <Route path="settings/:section" element={<SettingsPages />} />
         <Route path="reports" element={<AdminReports />} />
         <Route path="categories" element={<CategoriesAdmin />} />
+        <Route path="gift-cards" element={<GiftCardsAdmin />} />
+        <Route path="messages" element={<MessagesAdmin />} />
         <Route path="audit" element={<Audit />} />
         <Route path="emails" element={<DevEmails />} />
         <Route path="*" element={<Empty title="Not found" />} />

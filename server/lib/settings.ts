@@ -28,7 +28,14 @@ export const SETTING_DEFAULTS = {
   returns: { enabled: true },
   reviews: { requireModeration: true, verifiedPurchaseOnly: false },
   maintenance: { enabled: false, message: "CrownCart is undergoing scheduled maintenance. Please check back shortly." },
-  features: { wishlist: true, reviews: true, coupons: true },
+  features: { wishlist: true, reviews: true, coupons: true, assistant: true, viewer3d: true },
+  /** 1 point is worth pointValuePaise; points are earned on delivered orders. */
+  loyalty: { enabled: true, pointsPerHundredRupees: 1, pointValuePaise: 100, maxRedeemPercent: 20 },
+  referrals: { enabled: true, referrerPoints: 200, refereePoints: 100 },
+  giftCards: { enabled: true },
+  /** Which events send an SMS/WhatsApp to customers who opted in. */
+  messaging: { orderPlaced: true, outForDelivery: true, delivered: true, preferWhatsApp: false },
+  courier: { pickupLocation: "Primary", defaultWeightKg: 0.5, lengthCm: 30, breadthCm: 20, heightCm: 10 },
 };
 
 export type Settings = typeof SETTING_DEFAULTS;

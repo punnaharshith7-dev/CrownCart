@@ -39,6 +39,10 @@ export interface CartSummary {
   freeShippingThresholdPaise: number;
   checkoutBlocked: boolean;
   taxNote: string;
+  payablePaise: number;
+  loyalty: { enabled: boolean; balance: number; maxUsable: number; pointValuePaise: number; applied: number; appliedPaise: number };
+  giftCard: { code: string; balancePaise: number; appliedPaise: number } | null;
+  giftCardError: string | null;
 }
 
 const COUPON_KEY = "cc-coupon";
@@ -82,6 +86,24 @@ export function Summary({ cart, children }: { cart: CartSummary; children?: Reac
         <span>Total</span>
         <span className="num">{inr(cart.totalPaise)}</span>
       </div>
+      {cart.loyalty?.appliedPaise > 0 && (
+        <div className="sum-row" style={{ color: "var(--success)" }}>
+          <span>Points ({cart.loyalty.applied})</span>
+          <span className="num">−{inr(cart.loyalty.appliedPaise)}</span>
+        </div>
+      )}
+      {cart.giftCard && cart.giftCard.appliedPaise > 0 && (
+        <div className="sum-row" style={{ color: "var(--success)" }}>
+          <span>Gift card {cart.giftCard.code.slice(-4)}</span>
+          <span className="num">−{inr(cart.giftCard.appliedPaise)}</span>
+        </div>
+      )}
+      {cart.payablePaise !== cart.totalPaise && (
+        <div className="sum-row total">
+          <span>To pay</span>
+          <span className="num">{inr(cart.payablePaise)}</span>
+        </div>
+      )}
       <p className="tiny muted">{cart.taxNote}</p>
       {remaining > 0 && cart.subtotalPaise > 0 && (
         <div className="stack" style={{ "--gap": "6px", marginTop: 10 } as React.CSSProperties}>

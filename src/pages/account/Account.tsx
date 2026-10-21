@@ -29,6 +29,9 @@ export interface OrderDetail extends OrderSummary {
   discountPaise: number;
   shippingPaise: number;
   refundedPaise: number;
+  pointsUsed: number;
+  pointsPaise: number;
+  giftCardPaise: number;
   couponCode: string | null;
   deliveredAt: string | null;
   checkoutId: number;
@@ -39,6 +42,10 @@ export interface OrderDetail extends OrderSummary {
   shipments: {
     id: number;
     trackingNumber: string;
+    carrier: string;
+    courierName: string | null;
+    labelUrl: string | null;
+    trackingUrl: string | null;
     status: string;
     partner: { name: string; phone: string | null; status: string; statusLabel: string; failureReason: string | null } | null;
     events: { status: string; label: string; reason: string; at: string }[];
@@ -54,6 +61,7 @@ const NAV = [
   ["", "Overview"],
   ["orders", "Orders"],
   ["wishlist", "Wishlist"],
+  ["rewards", "Rewards"],
   ["addresses", "Addresses"],
   ["notifications", "Notifications"],
   ["support", "Support"],
@@ -243,6 +251,24 @@ export function OrderLines({ o }: { o: OrderDetail }) {
         <span>Total</span>
         <span>{inr(o.totalPaise)}</span>
       </div>
+      {o.pointsPaise > 0 && (
+        <div className="sum-row small">
+          <span>Paid with points ({o.pointsUsed})</span>
+          <span>−{inr(o.pointsPaise)}</span>
+        </div>
+      )}
+      {o.giftCardPaise > 0 && (
+        <div className="sum-row small">
+          <span>Paid with gift card</span>
+          <span>−{inr(o.giftCardPaise)}</span>
+        </div>
+      )}
+      {(o.pointsPaise > 0 || o.giftCardPaise > 0) && (
+        <div className="sum-row small" style={{ fontWeight: 700 }}>
+          <span>Paid by card / cash</span>
+          <span>{inr(o.totalPaise)}</span>
+        </div>
+      )}
       {o.refundedPaise > 0 && (
         <div className="sum-row small" style={{ color: "var(--success)" }}>
           <span>Refunded</span>
@@ -261,7 +287,23 @@ export function ShipmentTracking({ o }: { o: OrderDetail }) {
       {o.shipments.map((s) => (
         <div key={s.id} className="stack" style={{ "--gap": "8px" } as React.CSSProperties}>
           <div className="small">
-            Tracking <strong>{s.trackingNumber}</strong> <StatusBadge status={s.status} />
+            {s.courierName ? `${s.courierName} · ` : ""}Tracking <strong>{s.trackingNumber}</strong> <StatusBadge status={s.status} />
+            {s.trackingUrl && (
+              <>
+                {" "}
+                <a href={s.trackingUrl} target="_blank" rel="noopener noreferrer">
+                  Track with courier
+                </a>
+              </>
+            )}
+            {s.labelUrl && (
+              <>
+                {" · "}
+                <a href={s.labelUrl} target="_blank" rel="noopener noreferrer">
+                  Shipping label
+                </a>
+              </>
+            )}
           </div>
           {s.partner && (
             <div className="small muted">
@@ -750,6 +792,135 @@ function Support() {
   );
 }
 
+interface RewardsData {
+  balance: number;
+  loyalty: { enabled: boolean; pointsPerHundredRupees: number; pointValuePaise: number; maxRedeemPercent: number };
+  ledger: { delta: number; reason: string; ref_type: string | null; ref_id: string | null; created_at: string }[];
+  referral: { enabled: boolean; code: string; referrerPoints: number; refereePoints: number; invited: number; rewarded: number };
+}
+
+const REASONS: Record<string, string> = {
+  order_earned: "Earned on an order",
+  redeemed: "Used at checkout",
+  order_credit_restored: "Returned from a cancelled order",
+  return_reversed: "Reversed for returned items",
+  refund: "Returned with a refund",
+  referral_referrer: "Friend referral bonus",
+  referral_referee: "Welcome referral bonus",
+  admin_adjustment: "Adjustment by CrownCart",
+};
+
+function Rewards() {
+  const { data, error } = useApi<RewardsData>("/account/rewards");
+  const toast = useToast();
+  const [code, setCode] = useState("");
+  const [card, setCard] = useState<{ code: string; balancePaise: number; expiresAt: string | null } | null>(null);
+  useTitle("Rewards", { noindex: true });
+  if (error) return <ErrorState error={error} />;
+  if (!data) return <Loading />;
+  const link = `${location.origin}/?ref=${data.referral.code}`;
+  return (
+    <div className="grid" style={{ "--min": "320px", alignItems: "start" } as React.CSSProperties}>
+      <section className="card stack">
+        <div className="eyebrow">CrownCart points</div>
+        <div className="display" style={{ fontSize: 48 }}>
+          {data.balance}
+        </div>
+        <p className="small muted">
+          Worth {inr(data.balance * data.loyalty.pointValuePaise)}.{" "}
+          {data.loyalty.enabled
+            ? `Earn ${data.loyalty.pointsPerHundredRupees} point${data.loyalty.pointsPerHundredRupees === 1 ? "" : "s"} for every ₹100 you spend once your order is delivered, and use them for up to ${data.loyalty.maxRedeemPercent}% of an order at checkout.`
+            : "Points are paused right now."}
+        </p>
+      </section>
+
+      {data.referral.enabled && (
+        <section className="card stack">
+          <div className="eyebrow">Invite friends</div>
+          <p className="small">
+            Share your link. When a friend signs up with it and receives their first order, you get <strong>{data.referral.referrerPoints}</strong> points and they get{" "}
+            <strong>{data.referral.refereePoints}</strong>.
+          </p>
+          <div className="row">
+            <input className="input" style={{ flex: 1 }} readOnly value={link} aria-label="Your referral link" onFocus={(e) => e.target.select()} />
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() =>
+                navigator.clipboard
+                  .writeText(link)
+                  .then(() => toast("Link copied.", "success"))
+                  .catch(() => toast("Copy the link from the box.", "info"))
+              }
+            >
+              Copy
+            </button>
+          </div>
+          <span className="tiny muted">
+            Code {data.referral.code} · {data.referral.invited} joined · {data.referral.rewarded} rewarded
+          </span>
+        </section>
+      )}
+
+      <section className="card stack">
+        <div className="eyebrow">Gift card balance</div>
+        <form
+          className="row"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            try {
+              setCard(await api.get(`/account/gift-cards/${encodeURIComponent(code.trim())}`));
+            } catch (err) {
+              setCard(null);
+              toast(errorMessage(err), "error");
+            }
+          }}
+        >
+          <input className="input" style={{ flex: 1 }} placeholder="CC-XXXX-XXXX-XXXX" aria-label="Gift card code" value={code} onChange={(e) => setCode(e.target.value)} />
+          <button className="btn btn-outline btn-sm" type="submit" disabled={!code.trim()}>
+            Check
+          </button>
+        </form>
+        {card && (
+          <p className="small">
+            {card.code}: <strong>{inr(card.balancePaise)}</strong> available{card.expiresAt ? `, valid until ${date(card.expiresAt)}` : ""}. Enter the code at checkout to use it.
+          </p>
+        )}
+      </section>
+
+      <section className="card stack" style={{ gridColumn: "1 / -1" }}>
+        <h2 className="h3">Points history</h2>
+        {data.ledger.length === 0 ? (
+          <p className="small muted">No points yet.</p>
+        ) : (
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Activity</th>
+                  <th className="r">Points</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.ledger.map((l, i) => (
+                  <tr key={i}>
+                    <td>{date(l.created_at)}</td>
+                    <td>{REASONS[l.reason] ?? l.reason}</td>
+                    <td className="r num" style={{ color: l.delta > 0 ? "var(--success)" : undefined }}>
+                      {l.delta > 0 ? `+${l.delta}` : l.delta}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function Settings() {
   const { user, refresh, signOut } = useAuth();
   const profile = useApi<{ name: string; phone: string | null; email: string; preferences: Record<string, any>; hasPassword: boolean; googleLinked: boolean }>("/account/profile");
@@ -852,7 +1023,21 @@ function Settings() {
             <span>{l}</span>
           </label>
         ))}
-        <p className="tiny muted">Order and security emails are always sent.</p>
+        <div className="label" style={{ marginTop: 8 }}>
+          Text messages
+        </div>
+        {[
+          ["smsAlerts", "SMS updates about my orders"],
+          ["whatsappAlerts", "WhatsApp updates about my orders"],
+        ].map(([k, l]) => (
+          <label key={k} className="check">
+            <input type="checkbox" checked={prefs[k] === true} onChange={(e) => setPref(k, e.target.checked)} />
+            <span>{l}</span>
+          </label>
+        ))}
+        <p className="tiny muted">
+          Sent to the phone number on each order: order confirmation, out-for-delivery (with your delivery code) and delivered. Off unless you turn it on. Order and security emails are always sent.
+        </p>
       </section>
 
       <section className="card stack">
@@ -927,6 +1112,7 @@ export default function Account() {
         <Route path="orders" element={<Orders />} />
         <Route path="orders/:number" element={<OrderPage />} />
         <Route path="wishlist" element={<Wishlist />} />
+        <Route path="rewards" element={<Rewards />} />
         <Route path="addresses" element={<Addresses />} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="support" element={<Support />} />

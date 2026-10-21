@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth, type Role } from "./lib/auth";
 import { ThemeProvider } from "./lib/theme";
@@ -49,6 +49,17 @@ function NotFound() {
 }
 
 function Root() {
+  const loc = useLocation();
+  useEffect(() => {
+    const ref = new URLSearchParams(loc.search).get("ref");
+    if (ref && /^[A-Za-z0-9]{3,20}$/.test(ref)) {
+      try {
+        sessionStorage.setItem("cc-ref", ref.toUpperCase());
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [loc.search]);
   return (
     <Suspense fallback={<Loading />}>
       <Routes>

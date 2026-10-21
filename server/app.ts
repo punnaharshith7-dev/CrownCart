@@ -18,6 +18,8 @@ import { deliveryRoutes } from "./routes/delivery.ts";
 import { supportRoutes } from "./routes/support.ts";
 import { seoRoutes } from "./routes/seo.ts";
 import { googleRoutes } from "./routes/google.ts";
+import { shippingRoutes } from "./routes/shipping.ts";
+import { assistantRoutes } from "./routes/assistant.ts";
 
 const SAFE = new Set(["GET", "HEAD", "OPTIONS"]);
 const LAN = /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/;
@@ -67,7 +69,7 @@ export function createApp(db: Db) {
   // cookies are SameSite=Lax as a second layer. The payment webhook is
   // exempt because it is authenticated by its HMAC signature instead.
   app.use("/api/*", async (c, next) => {
-    if (!SAFE.has(c.req.method) && c.req.path !== "/api/payments/razorpay/webhook") {
+    if (!SAFE.has(c.req.method) && !["/api/payments/razorpay/webhook", "/api/shipping/courier-webhook"].includes(c.req.path)) {
       const origin = c.req.header("origin") ?? c.req.header("referer")?.replace(/^(https?:\/\/[^/]+).*$/, "$1");
       if (!origin || !originAllowed(origin)) throw forbidden("Cross-site request blocked.");
     }
@@ -110,6 +112,8 @@ export function createApp(db: Db) {
   app.route("/api/admin", adminRoutes);
   app.route("/api/delivery", deliveryRoutes);
   app.route("/api/support", supportRoutes);
+  app.route("/api/shipping", shippingRoutes);
+  app.route("/api/assistant", assistantRoutes);
   app.route("/", seoRoutes);
 
   app.notFound((c) => c.json({ error: { code: "not_found", message: "Not found." } }, 404));

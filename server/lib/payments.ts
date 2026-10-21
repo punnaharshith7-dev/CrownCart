@@ -5,6 +5,7 @@ import { conflict, unavailable } from "./errors.ts";
 import { commitReservedStock, releaseReservedStock, transitionOrder } from "./orders.ts";
 import { notify, notifyMany, sendEmail } from "./notify.ts";
 import { audit } from "./audit.ts";
+import { messageCustomer } from "./messaging.ts";
 
 // ───────────────────────────── Razorpay client ─────────────────────────────
 
@@ -61,12 +62,14 @@ function storeStaff(db: Db, storeId: number): number[] {
  * same checkout (duplicate webhook, verify + webhook race) changes nothing.
  * Must run inside db.tx().
  */
-export function confirmCheckout(db: Db, checkoutId: number, how: { paymentId?: number; cod?: boolean }) {
+export function confirmCheckout(db: Db, checkoutId: number, how: { paymentId?: number; cod?: boolean; prepaidByCredit?: boolean }) {
   const checkout = db.get("SELECT * FROM checkouts WHERE id = ?", [checkoutId]);
   if (!checkout) throw conflict("Checkout not found.");
   if (checkout.status === "paid" || checkout.status === "cod") return false;
   if (checkout.status !== "pending") throw conflict(`Checkout is ${checkout.status}.`);
 
+  // Fully paid with points/gift card: stored on the cod rail but settled as paid.
+  if (how.prepaidByCredit) how = { cod: false };
   db.run("UPDATE checkouts SET status = ? WHERE id = ?", [how.cod ? "cod" : "paid", checkoutId]);
   const orders = db.all("SELECT * FROM orders WHERE checkout_id = ?", [checkoutId]);
   const user = db.get("SELECT email, name FROM users WHERE id = ?", [checkout.user_id])!;
@@ -91,6 +94,7 @@ export function confirmCheckout(db: Db, checkoutId: number, how: { paymentId?: n
     [checkout.user_id, checkoutId],
   );
   const numbers = orders.map((o) => o.number).join(", ");
+  messageCustomer(db, checkout.user_id, orders[0].ship_phone, "orderPlaced", `Order ${numbers} is confirmed. Track it at ${config.publicUrl}/account/orders/${orders[0].number}`);
   notify(db, checkout.user_id, {
     type: "order.placed",
     title: orders.length > 1 ? `Orders ${numbers} placed` : `Order ${numbers} placed`,

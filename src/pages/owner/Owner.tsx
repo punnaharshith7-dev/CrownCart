@@ -267,7 +267,18 @@ function OrderView({ storeId }: { storeId: number }) {
             </Button>
           </form>
         )}
-        {!actions.transitions.length && !actions.cancel && !data!.partners.length && <span className="small muted">No actions needed from the store right now.</span>}
+        {actions.courier && (
+          <Button className="btn-outline" loading={busy} onClick={() => run(() => api.post(`/owner/stores/${storeId}/orders/${o.number}/courier`), "Courier booked and pickup scheduled.")}>
+            Book courier
+          </Button>
+        )}
+        {o.shipments.some((s) => s.carrier === "shiprocket") && (
+          <Button className="btn-ghost" loading={busy} onClick={() => run(() => api.post(`/owner/stores/${storeId}/orders/${o.number}/courier/sync`), "Tracking refreshed.")}>
+            Refresh courier tracking
+          </Button>
+        )}
+        {o.status === "ready_for_dispatch" && !actions.courierConfigured && <span className="tiny muted">Courier booking appears once Shiprocket is configured.</span>}
+        {!actions.transitions.length && !actions.cancel && !data!.partners.length && !actions.courier && <span className="small muted">No actions needed from the store right now.</span>}
       </div>
       <div className="two-col">
         <div className="stack">

@@ -321,7 +321,10 @@ export const catalogRoutes = new Hono<AppEnv>()
         WHERE v.product_id = ? AND v.is_active = 1 ORDER BY v.sort_order, v.id`,
       [p.id],
     );
-    const media = db.all("SELECT id, variant_id, kind, url, alt FROM product_media WHERE product_id = ? ORDER BY sort_order, id", [p.id]);
+    const show3d = getSetting(db, "features").viewer3d;
+    const media = db
+      .all("SELECT id, variant_id, kind, url, alt FROM product_media WHERE product_id = ? ORDER BY sort_order, id", [p.id])
+      .filter((m) => show3d || m.kind !== "model");
     const specs = db.all("SELECT label, value FROM product_specs WHERE product_id = ? ORDER BY sort_order, id", [p.id]);
     const reviews = db.all(
       `SELECT r.id, r.rating, r.title, r.body, r.verified_purchase, r.helpful_count, r.created_at, u.name

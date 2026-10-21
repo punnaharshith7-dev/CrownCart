@@ -9,6 +9,7 @@ import { requireUser } from "../lib/auth.ts";
 import { summarizeCart } from "../lib/pricing.ts";
 import { getSetting } from "../lib/settings.ts";
 import { generateOrderNumber, reserveStock } from "../lib/orders.ts";
+import { addPoints, debitGiftCard } from "../lib/credits.ts";
 import { rateLimit } from "../lib/rate-limit.ts";
 import { audit } from "../lib/audit.ts";
 import {
@@ -28,6 +29,8 @@ export function isServiceable(db: Db, pincode: string) {
 
 function paymentOptions(db: Db, totalPaise: number) {
   const cod = getSetting(db, "cod");
+  // Nothing left to pay once points and a gift card cover the order.
+  if (totalPaise === 0) return [{ method: "credit", label: "Paid in full with points and gift card", available: true, reason: null }];
   return [
     {
       method: "razorpay",
@@ -81,7 +84,10 @@ export const checkoutRoutes = new Hono<AppEnv>()
   .get("/options", (c) => {
     const u = requireUser(c);
     const db = c.get("db");
-    const summary = summarizeCart(db, u.id, c.req.query("coupon") || null);
+    const summary = summarizeCart(db, u.id, c.req.query("coupon") || null, {
+      points: Number(c.req.query("points") ?? 0) || 0,
+      giftCardCode: c.req.query("giftCard") || null,
+    });
     const addresses = db.all("SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC, created_at DESC", [u.id]).map((a) => ({
       id: a.id,
       label: a.label,
@@ -99,7 +105,7 @@ export const checkoutRoutes = new Hono<AppEnv>()
     return c.json({
       summary,
       addresses,
-      payments: paymentOptions(db, summary.totalPaise),
+      payments: paymentOptions(db, summary.payablePaise),
       delivery: { estimateDaysMin: shipping.estimateDaysMin, estimateDaysMax: shipping.estimateDaysMax },
       requireVerifiedEmail: getSetting(db, "checkout").requireVerifiedEmail && !u.emailVerified,
     });
@@ -120,8 +126,10 @@ export const checkoutRoutes = new Hono<AppEnv>()
       c,
       z.object({
         addressId: id,
-        paymentMethod: z.enum(["cod", "razorpay"]),
+        paymentMethod: z.enum(["cod", "razorpay", "credit"]),
         couponCode: z.string().trim().max(40).optional().nullable(),
+        pointsToUse: z.number().int().min(0).max(10_000_000).default(0),
+        giftCardCode: z.string().trim().max(40).optional().nullable(),
         idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),
         expectedTotalPaise: z.number().int().nonnegative(),
       }),
@@ -137,17 +145,22 @@ export const checkoutRoutes = new Hono<AppEnv>()
       const prior = db.get("SELECT * FROM checkouts WHERE user_id = ? AND idempotency_key = ?", [u.id, input.idempotencyKey]);
       if (prior) return { checkoutId: prior.id as number, duplicate: true };
 
-      const summary = summarizeCart(db, u.id, input.couponCode);
+      const summary = summarizeCart(db, u.id, input.couponCode, { points: input.pointsToUse, giftCardCode: input.giftCardCode });
       if (summary.lines.length === 0) throw conflict("Your bag is empty.");
       if (summary.checkoutBlocked) {
         throw conflict("Some items in your bag need attention before checkout.", { issues: summary.lines.filter((l) => l.issue).map((l) => ({ itemId: l.itemId, issue: l.issue })) });
       }
       if (input.couponCode && !summary.coupon) throw conflict(summary.couponError ?? "This coupon cannot be applied.");
-      if (summary.totalPaise !== input.expectedTotalPaise) {
-        throw conflict("Prices or availability changed since you reviewed your order. Please check the updated total.", { reason: "total_changed", totalPaise: summary.totalPaise });
+      if (input.giftCardCode && !summary.giftCard) throw conflict(summary.giftCardError ?? "This gift card cannot be used.");
+      if (input.pointsToUse !== summary.loyalty.applied) throw conflict("Your points balance changed. Please review your order again.", { reason: "total_changed" });
+      if (summary.payablePaise !== input.expectedTotalPaise) {
+        throw conflict("Prices or availability changed since you reviewed your order. Please check the updated total.", { reason: "total_changed", totalPaise: summary.payablePaise });
       }
-      const option = paymentOptions(db, summary.totalPaise).find((p) => p.method === input.paymentMethod)!;
-      if (!option.available) throw conflict(option.reason ?? "That payment method is unavailable.");
+      const option = paymentOptions(db, summary.payablePaise).find((p) => p.method === input.paymentMethod);
+      if (!option?.available) throw conflict(option?.reason ?? "That payment method is unavailable for this order.");
+      // Fully credit-paid orders ride the cash rail in storage but settle as paid immediately.
+      const storedMethod = input.paymentMethod === "credit" ? "cod" : input.paymentMethod;
+      const giftCardId = summary.giftCard ? (db.get("SELECT id FROM gift_cards WHERE code = ?", [summary.giftCard.code])!.id as number) : null;
 
       const addr = db.get("SELECT * FROM addresses WHERE id = ? AND user_id = ?", [input.addressId, u.id]);
       if (!addr) throw notFound("Address not found.");
@@ -156,20 +169,24 @@ export const checkoutRoutes = new Hono<AppEnv>()
       const payWindow = getSetting(db, "checkout").paymentWindowMinutes;
       const checkoutId = db.run(
         "INSERT INTO checkouts (user_id, idempotency_key, payment_method, total_paise, expires_at) VALUES (?, ?, ?, ?, ?)",
-        [u.id, input.idempotencyKey, input.paymentMethod, summary.totalPaise, input.paymentMethod === "razorpay" ? new Date(Date.now() + payWindow * 60_000).toISOString() : null],
+        [u.id, input.idempotencyKey, storedMethod, summary.payablePaise, input.paymentMethod === "razorpay" ? new Date(Date.now() + payWindow * 60_000).toISOString() : null],
       ).lastId;
 
       for (const g of summary.groups) {
         const number = generateOrderNumber(db);
         const orderId = db.run(
           `INSERT INTO orders (number, checkout_id, user_id, store_id, status, payment_method, payment_status, subtotal_paise, discount_paise,
-                               shipping_paise, tax_paise, total_paise, coupon_code, ship_name, ship_phone, ship_line1, ship_line2, ship_city, ship_state, ship_pincode)
-           VALUES (?, ?, ?, ?, 'pending_payment', ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                               shipping_paise, tax_paise, total_paise, coupon_code, ship_name, ship_phone, ship_line1, ship_line2, ship_city, ship_state, ship_pincode,
+                               points_used, points_paise, gift_card_paise, gift_card_id)
+           VALUES (?, ?, ?, ?, 'pending_payment', ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            number, checkoutId, u.id, g.storeId, input.paymentMethod, g.subtotalPaise, g.discountPaise, g.shippingPaise, g.taxPaise, g.totalPaise,
+            number, checkoutId, u.id, g.storeId, storedMethod, g.subtotalPaise, g.discountPaise, g.shippingPaise, g.taxPaise, g.payablePaise,
             g.discountPaise ? summary.coupon?.code ?? null : null, addr.name, addr.phone, addr.line1, addr.line2, addr.city, addr.state, addr.pincode,
+            g.pointsUsed, g.pointsPaise, g.giftCardPaise, g.giftCardPaise ? giftCardId : null,
           ],
         ).lastId;
+        if (g.pointsUsed) addPoints(db, u.id, -g.pointsUsed, "redeemed", "order", orderId);
+        if (g.giftCardPaise && giftCardId) debitGiftCard(db, giftCardId, g.giftCardPaise, checkoutId, orderId, u.id);
         db.run("INSERT INTO order_status_history (order_id, from_status, to_status, actor_user_id, note) VALUES (?, NULL, 'pending_payment', ?, 'Order created')", [orderId, u.id]);
         for (const l of g.lines) {
           db.run(
@@ -185,6 +202,7 @@ export const checkoutRoutes = new Hono<AppEnv>()
         db.run("INSERT INTO coupon_redemptions (coupon_id, user_id, checkout_id) VALUES (?, ?, ?)", [coupon.id, u.id, checkoutId]);
       }
       if (input.paymentMethod === "cod") confirmCheckout(db, checkoutId, { cod: true });
+      if (input.paymentMethod === "credit") confirmCheckout(db, checkoutId, { prepaidByCredit: true });
       db.run("INSERT INTO analytics_events (name, user_id, props) VALUES ('checkout_submitted', ?, ?)", [u.id, JSON.stringify({ checkoutId, method: input.paymentMethod })]);
       return { checkoutId, duplicate: false };
     });

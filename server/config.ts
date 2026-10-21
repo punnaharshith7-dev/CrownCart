@@ -38,6 +38,19 @@ export const config = {
     clientId: env.GOOGLE_CLIENT_ID ?? "",
     clientSecret: env.GOOGLE_CLIENT_SECRET ?? "",
   },
+  twilio: {
+    accountSid: env.TWILIO_ACCOUNT_SID ?? "",
+    authToken: env.TWILIO_AUTH_TOKEN ?? "",
+    smsFrom: env.TWILIO_SMS_FROM ?? "",
+    whatsappFrom: env.TWILIO_WHATSAPP_FROM ?? "",
+  },
+  shiprocket: {
+    email: env.SHIPROCKET_EMAIL ?? "",
+    password: env.SHIPROCKET_PASSWORD ?? "",
+    webhookToken: env.SHIPROCKET_WEBHOOK_TOKEN ?? "",
+  },
+  // The Anthropic SDK reads ANTHROPIC_API_KEY (or ANTHROPIC_AUTH_TOKEN) itself.
+  assistantModel: env.ASSISTANT_MODEL ?? "claude-opus-5-5",
   publicUrl: env.PUBLIC_URL ?? "http://localhost:5173",
 };
 
@@ -46,4 +59,9 @@ export const integrations = () => ({
   razorpayWebhook: Boolean(config.razorpay.webhookSecret),
   email: config.email.provider === "resend" && Boolean(config.email.resendApiKey),
   google: Boolean(config.google.clientId && config.google.clientSecret),
+  sms: Boolean(config.twilio.accountSid && config.twilio.authToken && config.twilio.smsFrom),
+  whatsapp: Boolean(config.twilio.accountSid && config.twilio.authToken && config.twilio.whatsappFrom),
+  courier: Boolean(config.shiprocket.email && config.shiprocket.password),
+  courierWebhook: Boolean(config.shiprocket.webhookToken),
+  assistant: Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN),
 });

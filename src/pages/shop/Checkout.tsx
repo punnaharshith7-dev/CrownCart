@@ -13,7 +13,7 @@ import { Summary, savedCoupon, type CartSummary } from "./Cart";
 interface Options {
   summary: CartSummary;
   addresses: Address[];
-  payments: { method: "cod" | "razorpay"; label: string; available: boolean; reason: string | null }[];
+  payments: { method: "cod" | "razorpay" | "credit"; label: string; available: boolean; reason: string | null }[];
   delivery: { estimateDaysMin: number; estimateDaysMax: number };
   requireVerifiedEmail: boolean;
 }
@@ -79,7 +79,10 @@ export default function Checkout() {
   const [opts, setOpts] = useState<Options | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [addressId, setAddressId] = useState<number | null>(null);
-  const [method, setMethod] = useState<"cod" | "razorpay" | null>(null);
+  const [method, setMethod] = useState<"cod" | "razorpay" | "credit" | null>(null);
+  const [points, setPoints] = useState(0);
+  const [giftCode, setGiftCode] = useState("");
+  const [giftInput, setGiftInput] = useState("");
   const [adding, setAdding] = useState(false);
   const [placing, setPlacing] = useState(false);
   const [placeError, setPlaceError] = useState<string | null>(null);
@@ -88,12 +91,19 @@ export default function Checkout() {
   const coupon = savedCoupon();
   useTitle("Checkout", { noindex: true });
 
-  const load = async () => {
+  const load = async (credit: { points?: number; gift?: string } = {}) => {
+    const pts = credit.points ?? points;
+    const gift = credit.gift ?? giftCode;
+    const qs = new URLSearchParams();
+    if (coupon) qs.set("coupon", coupon);
+    if (pts) qs.set("points", String(pts));
+    if (gift) qs.set("giftCard", gift);
     try {
-      const o = await api.get<Options>(`/checkout/options${coupon ? `?coupon=${encodeURIComponent(coupon)}` : ""}`);
+      const o = await api.get<Options>(`/checkout/options?${qs}`);
       setOpts(o);
       setAddressId((cur) => cur ?? o.addresses.find((a) => a.isDefault && a.serviceable)?.id ?? o.addresses.find((a) => a.serviceable)?.id ?? null);
-      setMethod((cur) => cur ?? o.payments.find((p) => p.available)?.method ?? null);
+      // Keep the chosen method only if it is still offered (e.g. "credit" appears only when nothing is left to pay).
+      setMethod((cur) => (cur && o.payments.some((p) => p.method === cur && p.available) ? cur : o.payments.find((p) => p.available)?.method ?? null));
     } catch (e) {
       setError(e);
     }
@@ -123,8 +133,10 @@ export default function Checkout() {
         addressId,
         paymentMethod: method,
         couponCode: opts.summary.coupon?.code ?? null,
+        pointsToUse: opts.summary.loyalty.applied,
+        giftCardCode: opts.summary.giftCard?.code ?? null,
         idempotencyKey: idempotencyKey.current,
-        expectedTotalPaise: opts.summary.totalPaise,
+        expectedTotalPaise: opts.summary.payablePaise,
       });
       if (r.razorpay) {
         const result = await payWithRazorpay(r.checkoutId, r.razorpay);
@@ -138,7 +150,10 @@ export default function Checkout() {
       navigate(`/order-placed/${r.checkoutId}`, { replace: true });
     } catch (e) {
       setPlaceError(errorMessage(e));
-      if (e instanceof ApiError && e.details?.reason === "total_changed") load();
+      if (e instanceof ApiError && e.details?.reason === "total_changed") {
+        idempotencyKey.current = newRequestId();
+        load();
+      }
       setPlacing(false);
     }
   };
@@ -194,6 +209,73 @@ export default function Checkout() {
               </p>
             </section>
 
+            {
+              <section aria-labelledby="credit-h" className="stack">
+                <h2 className="h3" id="credit-h">
+                  Points & gift cards
+                </h2>
+                {opts.summary.loyalty.enabled && opts.summary.loyalty.balance > 0 && (
+                  <div className="panel stack" style={{ "--gap": "8px" } as React.CSSProperties}>
+                    <div className="spread small">
+                      <span>
+                        You have <strong>{opts.summary.loyalty.balance}</strong> points (₹{opts.summary.loyalty.pointValuePaise / 100} each)
+                      </span>
+                      <span className="muted">Up to {opts.summary.loyalty.maxUsable} usable on this order</span>
+                    </div>
+                    {opts.summary.loyalty.maxUsable > 0 && (
+                      <div className="row">
+                        <input
+                          type="range"
+                          min={0}
+                          max={opts.summary.loyalty.maxUsable}
+                          value={points}
+                          aria-label="Points to use"
+                          onChange={(e) => setPoints(Number(e.target.value))}
+                          onMouseUp={() => load({ points })}
+                          onKeyUp={() => load({ points })}
+                          onTouchEnd={() => load({ points })}
+                          style={{ flex: 1 }}
+                        />
+                        <button type="button" className="btn btn-outline btn-sm" onClick={() => { const all = opts.summary.loyalty.maxUsable; setPoints(all); load({ points: all }); }}>
+                          Use max
+                        </button>
+                      </div>
+                    )}
+                    {opts.summary.loyalty.applied > 0 && <span className="small">Using {opts.summary.loyalty.applied} points ({inr(opts.summary.loyalty.appliedPaise)} off).</span>}
+                  </div>
+                )}
+                <form
+                  className="row"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const code = giftInput.trim().toUpperCase();
+                    setGiftCode(code);
+                    load({ gift: code });
+                  }}
+                >
+                  <label className="sr-only" htmlFor="gift">
+                    Gift card code
+                  </label>
+                  <input id="gift" className="input" style={{ flex: 1, minWidth: 180 }} placeholder="Gift card code (CC-XXXX-XXXX-XXXX)" value={giftInput} onChange={(e) => setGiftInput(e.target.value)} />
+                  {giftCode ? (
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => { setGiftCode(""); setGiftInput(""); load({ gift: "" }); }}>
+                      Remove
+                    </button>
+                  ) : (
+                    <button type="submit" className="btn btn-outline btn-sm" disabled={!giftInput.trim()}>
+                      Apply
+                    </button>
+                  )}
+                </form>
+                {giftCode && opts.summary.giftCardError && <span className="field-error">{opts.summary.giftCardError}</span>}
+                {opts.summary.giftCard && (
+                  <span className="small">
+                    Gift card applied: {inr(opts.summary.giftCard.appliedPaise)} off ({inr(opts.summary.giftCard.balancePaise - opts.summary.giftCard.appliedPaise)} will remain).
+                  </span>
+                )}
+              </section>
+            }
+
             <section aria-labelledby="pay-h" className="stack">
               <h2 className="h3" id="pay-h">
                 2. Payment
@@ -240,7 +322,7 @@ export default function Checkout() {
                 </div>
               )}
               <Button className="btn-lg btn-block" style={{ marginTop: 14 }} loading={placing} disabled={!canPlace} onClick={place}>
-                {method === "cod" ? `Place order · ${inr(opts.summary.totalPaise)}` : `Pay ${inr(opts.summary.totalPaise)}`}
+                {method === "credit" ? "Place order" : method === "cod" ? `Place order · ${inr(opts.summary.payablePaise)}` : `Pay ${inr(opts.summary.payablePaise)}`}
               </Button>
               <p className="tiny muted" style={{ marginTop: 8 }}>
                 By placing your order you agree to our <Link to="/policies/terms">terms</Link> and <Link to="/policies/returns">return policy</Link>.

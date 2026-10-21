@@ -148,7 +148,13 @@ function Register() {
     setBusy(true);
     setError(null);
     try {
-      await register(form);
+      let referralCode: string | null = null;
+      try {
+        referralCode = sessionStorage.getItem("cc-ref");
+      } catch {
+        /* ignore */
+      }
+      await register({ ...form, referralCode });
       navigate(returnTo || "/account?welcome=1", { replace: true });
     } catch (err) {
       setError(errorMessage(err));

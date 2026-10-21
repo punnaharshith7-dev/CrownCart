@@ -54,6 +54,7 @@ const PRODUCTS = [
     returnDays: 7,
     hero: "/products/jordan_bg_hd.png",
     image: "/products/jordan1.png",
+    model: "/models/shoe.glb",
     specs: [
       ["Silhouette", "High-Top Retro OG Profile"],
       ["Upper", "Patent University Red & White Leather"],
@@ -86,6 +87,7 @@ const PRODUCTS = [
     returnDays: 0,
     hero: "/products/nautilus_bg_hd.png",
     image: "/products/nautilus.png",
+    model: "/models/watch.glb",
     specs: [
       ["Calibre", "CH 28-520 C Self-Winding Flyback"],
       ["Case & Bracelet", "40.5mm Solid 18K Rose Gold"],
@@ -111,6 +113,7 @@ const PRODUCTS = [
     returnDays: 14,
     hero: "/products/ax_bomber_bg_hd.png",
     image: "/products/ax_bomber.png",
+    model: "/models/apparel.glb",
     specs: [
       ["Composition", "Technical Stretch High-Density Nylon"],
       ["Hardware", "Matte Black Dual-Way Front Zip"],
@@ -136,6 +139,7 @@ const PRODUCTS = [
     returnDays: 7,
     hero: "/products/asus_tuf_bg_hd.png",
     image: "/products/asus_tuf.png",
+    model: "/models/laptop.glb",
     specs: [
       ["Processor", "AMD Ryzen™ 7 7735HS (8C/16T, 4.75GHz)"],
       ["Graphics", "NVIDIA® GeForce RTX™ 4060 8GB GDDR6"],
@@ -149,6 +153,13 @@ const PRODUCTS = [
 /** Catalog data the homepage depends on. Safe to run repeatedly. */
 export function seedCatalog(db: Db) {
   db.tx(() => {
+    // 3D models shipped with the original site, attached once to their products.
+    for (const p of PRODUCTS) {
+      const row = db.get("SELECT id FROM products WHERE slug = ?", [p.slug]);
+      if (row && !db.get("SELECT 1 FROM product_media WHERE product_id = ? AND kind = 'model'", [row.id])) {
+        db.run("INSERT INTO product_media (product_id, kind, url, alt, sort_order) VALUES (?, 'model', ?, ?, 50)", [row.id, p.model, `${p.name} — 3D model`]);
+      }
+    }
     CATEGORIES.forEach((c, i) =>
       db.run("INSERT OR IGNORE INTO categories (name, slug, description, sort_order) VALUES (?, ?, ?, ?)", [c.name, c.slug, c.description, i]),
     );
@@ -173,6 +184,7 @@ export function seedCatalog(db: Db) {
       p.specs.forEach(([label, value], j) => db.run("INSERT INTO product_specs (product_id, label, value, sort_order) VALUES (?, ?, ?, ?)", [pid, label, value, j]));
       db.run("INSERT INTO product_media (product_id, kind, url, alt, sort_order) VALUES (?, 'image', ?, ?, 0)", [pid, p.image, p.name]);
       db.run("INSERT INTO product_media (product_id, kind, url, alt, sort_order) VALUES (?, 'hero', ?, ?, 1)", [pid, p.hero, `${p.name} — editorial photograph`]);
+      db.run("INSERT INTO product_media (product_id, kind, url, alt, sort_order) VALUES (?, 'model', ?, ?, 50)", [pid, p.model, `${p.name} — 3D model`]);
       p.variants.forEach((v, j) => {
         const vid = db.run(
           "INSERT INTO product_variants (product_id, sku, name, size, price_paise, max_per_order, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",

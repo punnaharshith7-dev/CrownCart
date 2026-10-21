@@ -78,3 +78,44 @@ Switch to **Live** keys only after Razorpay activates your account.
 Emails CrownCart sends: email verification, password reset, order confirmation, delivery code when an
 order is out for delivery, staff invitations, and support replies to guests. Every email is recorded in
 the outbox; failures are marked `failed` with the provider's error (Admin → Email outbox in development).
+
+---
+
+## 4. AI shopping assistant (Claude)
+
+1. Create an API key at <https://console.anthropic.com/> → **API Keys**.
+2. `.env`: `ANTHROPIC_API_KEY=sk-ant-...` (optionally `ASSISTANT_MODEL`, default `claude-opus-5-5`).
+3. Restart the API. The "✦ Ask CrownCart" button appears on shop pages (not on the homepage).
+
+How it works: Claude searches the live catalog through three read-only tools (search, product details,
+categories). It can't see accounts, change bags, place orders or apply discounts, and it is told to recommend
+only products the tools return. It runs at low effort to keep replies quick and costs down, is rate-limited
+(10 messages / 10 min for guests, 30 for signed-in shoppers), and can be switched off in
+Admin → Settings → Features. Each message costs real API usage — watch it in the Anthropic Console.
+
+## 5. SMS & WhatsApp (Twilio)
+
+1. Sign up at <https://www.twilio.com/>. Copy the **Account SID** and **Auth Token**.
+2. SMS: buy or register a sender and set `TWILIO_SMS_FROM` (e.g. `+1...` or an approved Indian sender).
+   **India:** promotional/transactional SMS to Indian numbers requires DLT registration (entity + templates)
+   with a telecom operator before messages are delivered.
+3. WhatsApp: enable a WhatsApp sender in Twilio and set `TWILIO_WHATSAPP_FROM` (e.g. `+14155238886` for the
+   sandbox). Outside a 24-hour customer conversation, WhatsApp only delivers **pre-approved templates**, so
+   register templates matching the three messages (order confirmed, out for delivery with code, delivered).
+4. Customers must opt in under **My account → Settings → Text messages**; nothing is sent otherwise.
+   Every message is listed in **Admin → SMS & WhatsApp** ("logged" = not sent because no provider is set).
+
+## 6. Courier (Shiprocket)
+
+1. In Shiprocket: **Settings → API → Configure → Create an API user** (a separate email from your login).
+   `.env`: `SHIPROCKET_EMAIL`, `SHIPROCKET_PASSWORD`.
+2. Add your pickup address in Shiprocket and put its exact **name** in Admin → Settings → Courier.
+3. Webhook for live tracking: Shiprocket **Settings → API → Webhooks** →
+   URL `https://YOUR-DOMAIN/api/shipping/courier-webhook`, token = any long random string, also set as
+   `SHIPROCKET_WEBHOOK_TOKEN`. (Shiprocket refuses URLs containing "shiprocket", hence the neutral path.)
+4. Stores then see **Book courier** on orders that are ready for dispatch: it creates the Shiprocket order,
+   assigns an AWB, schedules pickup and links the label. Tracking updates move the order to shipped,
+   out for delivery, delivered or returned-to-sender automatically; "Refresh courier tracking" pulls the
+   latest status on demand (useful locally, where webhooks can't reach you).
+
+The in-house delivery-partner flow keeps working alongside the courier: each order uses one or the other.

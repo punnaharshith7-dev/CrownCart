@@ -1,6 +1,8 @@
 import type { Db, Row } from "../db.ts";
 import { conflict } from "./errors.ts";
 import { notify } from "./notify.ts";
+import { onOrderDelivered, onOrderReturned, restoreOrderCredits } from "./credits.ts";
+import { messageCustomer } from "./messaging.ts";
 
 // ───────────────────────────── Order lifecycle ─────────────────────────────
 
@@ -90,6 +92,16 @@ export function transitionOrder(
 
   // Stock returns to sale when an order is cancelled before it leaves the store.
   if (to === "cancelled" && from !== "pending_payment") restockOrder(db, orderId, actorId, "order_cancelled");
+  // Points and gift-card value go back when an order will never be fulfilled.
+  if (to === "cancelled" || to === "failed" || to === "expired") restoreOrderCredits(db, orderId, to);
+  if (to === "delivered") {
+    onOrderDelivered(db, orderId);
+    messageCustomer(db, order.user_id, order.ship_phone, "delivered", `Order ${order.number} has been delivered. Thank you for shopping with us.`);
+  }
+  if (to === "returned") onOrderReturned(db, orderId);
+  if (to === "out_for_delivery" && opts.notifyCustomer !== false) {
+    messageCustomer(db, order.user_id, order.ship_phone, "outForDelivery", `Order ${order.number} is out for delivery today.`);
+  }
 
   if (opts.notifyCustomer !== false && to !== "pending_payment") {
     notify(db, order.user_id, {

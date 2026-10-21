@@ -15,6 +15,7 @@
     "create-admin": "node --disable-warning=ExperimentalWarning server/scripts/create-admin.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.0.0",
     "@hono/node-server": "^1.19.17",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",

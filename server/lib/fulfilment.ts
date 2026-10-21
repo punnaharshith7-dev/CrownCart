@@ -12,6 +12,7 @@ import {
 import { notify, notifyMany, sendEmail } from "./notify.ts";
 import { getSetting } from "./settings.ts";
 import { audit } from "./audit.ts";
+import { messageCustomer } from "./messaging.ts";
 
 export function createShipment(db: Db, orderId: number): Row {
   const existing = db.get("SELECT * FROM shipments WHERE order_id = ? AND kind = 'forward' AND status NOT IN ('cancelled')", [orderId]);
@@ -150,6 +151,8 @@ export function partnerTransition(db: Db, assignmentId: number, partnerId: numbe
         });
         const customer = db.get("SELECT email FROM users WHERE id = ?", [a.customer_id]);
         if (customer) sendEmail(db, customer.email, `Order ${a.number} is out for delivery`, `Your delivery code is ${code}. Share it only when you receive your parcel.`);
+        const o = db.get("SELECT ship_phone FROM orders WHERE id = ?", [a.order_id]);
+        messageCustomer(db, a.customer_id, o?.ship_phone, "outForDelivery", `Order ${a.number} is out for delivery. Your delivery code is ${code}. Share it only when you receive the parcel.`);
         break;
       }
       case "delivered": {
