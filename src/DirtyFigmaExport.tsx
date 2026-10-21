@@ -1,14 +1,38 @@
 import { useState, useEffect, type CSSProperties } from "react";
+import { useNavigate } from "react-router-dom";
+import { homeFor, useAuth } from "./lib/auth";
+
+/** Smooth-scrolls to a homepage section, or navigates when it lives on another page. */
+function goToSection(navigate: (to: string) => void, key: string) {
+  const ids: Record<string, string> = { home: "hero", explore: "product-shoe", why: "why-crowncart", story: "our-story" };
+  if (key === "home") return window.scrollTo({ top: 0, behavior: "smooth" });
+  if (key === "collections") return navigate("/shop");
+  if (key === "contact") return navigate("/contact");
+  document.getElementById(ids[key] ?? key)?.scrollIntoView({ behavior: "smooth" });
+}
 
 export function Underlay() {
   const [isOpen, setIsOpen] = useState(false);
-  const [isSignInOpen, setIsSignInOpen] = useState(false);
-  const [isSignedIn, setIsSignedIn] = useState(false);
+  const { user, cartCount } = useAuth();
+  const navigate = useNavigate();
+  const [sections, setSections] = useState<{ key: string; number: string; label: string; description: string; visible: boolean }[]>([]);
+
+  useEffect(() => {
+    fetch("/api/catalog/home")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setSections(d.homepage.sections.filter((x: { visible: boolean }) => x.visible)))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const handleOpenDir = () => setIsOpen(true);
+    const handleEsc = (e: KeyboardEvent) => e.key === "Escape" && setIsOpen(false);
     window.addEventListener("crowncart-open-directory", handleOpenDir);
-    return () => window.removeEventListener("crowncart-open-directory", handleOpenDir);
+    window.addEventListener("keydown", handleEsc);
+    return () => {
+      window.removeEventListener("crowncart-open-directory", handleOpenDir);
+      window.removeEventListener("keydown", handleEsc);
+    };
   }, []);
 
   return (
@@ -70,6 +94,8 @@ export function Underlay() {
           <button
             type="button"
             onClick={() => setIsOpen(!isOpen)}
+            aria-expanded={isOpen}
+            aria-controls="home-directory"
             style={{
               pointerEvents: "all",
               cursor: "pointer",
@@ -112,7 +138,7 @@ export function Underlay() {
           {/* Sign In Button Directly Below Discover */}
           <button
             type="button"
-            onClick={() => setIsSignInOpen(true)}
+            onClick={() => navigate(user ? homeFor(user) : "/signin?returnTo=%2F")}
             style={{
               pointerEvents: "all",
               cursor: "pointer",
@@ -122,8 +148,8 @@ export function Underlay() {
               letterSpacing: 1.2,
               textTransform: "uppercase",
               padding: "9px 20px",
-              backgroundColor: isSignInOpen ? "#111111" : "transparent",
-              color: isSignInOpen ? "#ffffff" : "#111111",
+              backgroundColor: "transparent",
+              color: "#111111",
               border: "1.5px solid #111111",
               borderRadius: "24px",
               display: "flex",
@@ -135,25 +161,47 @@ export function Underlay() {
               minWidth: "128px",
             }}
             onMouseEnter={(e) => {
-              if (!isSignInOpen) {
-                e.currentTarget.style.backgroundColor = "#111111";
-                e.currentTarget.style.color = "#ffffff";
-              }
+              e.currentTarget.style.backgroundColor = "#111111";
+              e.currentTarget.style.color = "#ffffff";
             }}
             onMouseLeave={(e) => {
-              if (!isSignInOpen) {
-                e.currentTarget.style.backgroundColor = "transparent";
-                e.currentTarget.style.color = "#111111";
-              }
+              e.currentTarget.style.backgroundColor = "transparent";
+              e.currentTarget.style.color = "#111111";
             }}
           >
-            <span>{isSignedIn ? "Client VIP ✓" : "Sign In"}</span>
+            <span>{user ? "My Account" : "Sign In"}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate("/cart")}
+            aria-label={`Bag, ${cartCount} item${cartCount === 1 ? "" : "s"}`}
+            style={{
+              pointerEvents: "all",
+              cursor: "pointer",
+              fontFamily: "'Inter', -apple-system, sans-serif",
+              fontSize: 12,
+              fontWeight: 600,
+              letterSpacing: 1.2,
+              textTransform: "uppercase",
+              padding: "9px 20px",
+              backgroundColor: "transparent",
+              color: "#111111",
+              border: "1.5px solid #111111",
+              borderRadius: "24px",
+              minWidth: "128px",
+            }}
+          >
+            Bag{cartCount > 0 ? ` (${cartCount})` : ""}
           </button>
 
           {/* Expandable Sections Panel directly under that button */}
           {isOpen && (
             <div
               className="no-scrollbar"
+              id="home-directory"
+              role="navigation"
+              aria-label="Site sections"
               style={{
                 position: "absolute",
                 top: "calc(100% + 14px)",
@@ -199,24 +247,26 @@ export function Underlay() {
                   MENU & DIRECTORY
                 </span>
                 <span style={{ fontSize: "11px", color: "#888888", fontWeight: "600" }}>
-                  07 SECTIONS
+                  {String(sections.length + 2).padStart(2, "0")} SECTIONS
                 </span>
               </div>
 
               {/* Exact 7 Navigation Sections */}
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 {[
-                  { id: "01", title: "Home", desc: "Return to overview" },
-                  { id: "02", title: "Explore", desc: "Interactive 3D experience" },
-                  { id: "03", title: "Collections", desc: "Fashion, technology & lifestyle" },
-                  { id: "04", title: "Why CrownCart", desc: "Quality & authenticity" },
-                  { id: "05", title: "Our Story", desc: "The heritage & design craft" },
-                  { id: "06", title: "Contact", desc: "Private client concierge" },
-                  { id: "07", title: "Reviews", desc: "Client testimonials & ratings" },
+                  ...sections.map((x, i) => ({ id: String(i + 1).padStart(2, "0"), key: x.key, title: x.label, desc: x.description })),
+                  { id: String(sections.length + 1).padStart(2, "0"), key: "shop", title: "Shop All", desc: "Search, filter and browse every product" },
+                  { id: String(sections.length + 2).padStart(2, "0"), key: "reviews", title: "Reviews", desc: "What customers say" },
                 ].map((item) => (
-                  <div
-                    key={item.id}
+                  <button
+                    type="button"
+                    key={item.key}
                     style={{
+                      width: "100%",
+                      border: "none",
+                      textAlign: "left",
+                      font: "inherit",
+                      color: "inherit",
                       padding: "10px 14px",
                       borderRadius: "12px",
                       backgroundColor: "rgba(0, 0, 0, 0.02)",
@@ -235,19 +285,10 @@ export function Underlay() {
                       e.currentTarget.style.transform = "translateX(0)";
                     }}
                     onClick={() => {
-                      if (item.title === "Reviews") {
-                        window.dispatchEvent(new CustomEvent("crowncart-open-reviews"));
-                        setIsOpen(false);
-                      } else if (item.title === "Home") {
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                        setIsOpen(false);
-                      } else if (item.title === "Explore" || item.title === "Collections") {
-                        const el = document.getElementById("product-shoe");
-                        if (el) el.scrollIntoView({ behavior: "smooth" });
-                        setIsOpen(false);
-                      } else {
-                        window.dispatchEvent(new CustomEvent("crowncart-explore"));
-                      }
+                      setIsOpen(false);
+                      if (item.key === "reviews") window.dispatchEvent(new CustomEvent("crowncart-open-reviews"));
+                      else if (item.key === "shop") navigate("/shop");
+                      else goToSection(navigate, item.key);
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -298,7 +339,7 @@ export function Underlay() {
                     >
                       &rarr;
                     </span>
-                  </div>
+                  </button>
                 ))}
               </div>
 
@@ -321,216 +362,6 @@ export function Underlay() {
           )}
         </div>
 
-        {/* Luxury Client Sign In Modal */}
-        {isSignInOpen && (
-          <div
-            role="dialog"
-            aria-modal="true"
-            style={{
-              position: "fixed",
-              inset: 0,
-              zIndex: 300,
-              backgroundColor: "rgba(0, 0, 0, 0.65)",
-              backdropFilter: "blur(16px)",
-              WebkitBackdropFilter: "blur(16px)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "20px",
-              pointerEvents: "all",
-              animation: "dropdownFadeIn 0.2s ease-out forwards",
-            }}
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setIsSignInOpen(false);
-            }}
-          >
-            <div
-              style={{
-                width: "100%",
-                maxWidth: "400px",
-                backgroundColor: "#ffffff",
-                borderRadius: "24px",
-                padding: "36px 32px",
-                boxShadow: "0 24px 60px rgba(0, 0, 0, 0.25)",
-                border: "1px solid rgba(0, 0, 0, 0.08)",
-                position: "relative",
-                fontFamily: "'Inter', sans-serif",
-              }}
-            >
-              {/* Close Button */}
-              <button
-                type="button"
-                onClick={() => setIsSignInOpen(false)}
-                style={{
-                  position: "absolute",
-                  top: "20px",
-                  right: "20px",
-                  background: "transparent",
-                  border: "none",
-                  fontSize: "16px",
-                  cursor: "pointer",
-                  color: "#888888",
-                  padding: "4px 8px",
-                  borderRadius: "50%",
-                }}
-                aria-label="Close modal"
-              >
-                ✕
-              </button>
-
-              <div style={{ textAlign: "center", marginBottom: "26px" }}>
-                <div
-                  style={{
-                    fontFamily: "'Antonio', sans-serif",
-                    fontSize: "30px",
-                    fontWeight: 700,
-                    letterSpacing: "-1px",
-                    color: "#111111",
-                  }}
-                >
-                  CrownCart
-                </div>
-                <div
-                  style={{
-                    fontSize: "10.5px",
-                    letterSpacing: "1.5px",
-                    textTransform: "uppercase",
-                    color: "#888888",
-                    marginTop: "6px",
-                    fontWeight: 600,
-                  }}
-                >
-                  Client Authentication
-                </div>
-              </div>
-
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  setIsSignedIn(true);
-                  setIsSignInOpen(false);
-                }}
-                style={{ display: "flex", flexDirection: "column", gap: "16px" }}
-              >
-                <div>
-                  <label
-                    style={{
-                      display: "block",
-                      fontSize: "10px",
-                      fontWeight: 700,
-                      letterSpacing: "1px",
-                      textTransform: "uppercase",
-                      color: "#555555",
-                      marginBottom: "6px",
-                    }}
-                  >
-                    Email Address
-                  </label>
-                  <input
-                    type="email"
-                    defaultValue="client@crowncart.luxury"
-                    required
-                    placeholder="Enter email"
-                    style={{
-                      width: "100%",
-                      padding: "11px 14px",
-                      borderRadius: "10px",
-                      border: "1.5px solid #e2e2e2",
-                      fontSize: "13px",
-                      outline: "none",
-                      boxSizing: "border-box",
-                      fontFamily: "'Inter', sans-serif",
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label
-                    style={{
-                      display: "block",
-                      fontSize: "10px",
-                      fontWeight: 700,
-                      letterSpacing: "1px",
-                      textTransform: "uppercase",
-                      color: "#555555",
-                      marginBottom: "6px",
-                    }}
-                  >
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    defaultValue="••••••••••••"
-                    required
-                    placeholder="Enter password"
-                    style={{
-                      width: "100%",
-                      padding: "11px 14px",
-                      borderRadius: "10px",
-                      border: "1.5px solid #e2e2e2",
-                      fontSize: "13px",
-                      outline: "none",
-                      boxSizing: "border-box",
-                      fontFamily: "'Inter', sans-serif",
-                    }}
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  style={{
-                    marginTop: "6px",
-                    padding: "13px 20px",
-                    backgroundColor: "#111111",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "12px",
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    letterSpacing: "1.5px",
-                    textTransform: "uppercase",
-                    cursor: "pointer",
-                    transition: "all 0.15s ease",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#2a2a2a")}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#111111")}
-                >
-                  Sign In to Vault
-                </button>
-              </form>
-
-              <div
-                style={{
-                  marginTop: "18px",
-                  textAlign: "center",
-                  fontSize: "11px",
-                  color: "#777777",
-                }}
-              >
-                Don&apos;t have an account?{" "}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsSignedIn(true);
-                    setIsSignInOpen(false);
-                  }}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "#111111",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    textDecoration: "underline",
-                    padding: 0,
-                    fontSize: "11px",
-                  }}
-                >
-                  Continue as Guest
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
       <div style={{ height: 60 }} />
       <div
@@ -712,7 +543,7 @@ export function Underlay() {
               }
             }}
           >
-            <span>SCROLL DOWN</span>
+            <span>EXPLORE</span>
             <span style={{ fontSize: "12px", transform: "translateY(1px)" }}>↓</span>
           </button>
         </div>

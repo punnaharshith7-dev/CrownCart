@@ -21,124 +21,53 @@ export interface ReviewItem {
   review: string;
   date: string;
   url: string;
+  verifiedPurchase: boolean;
   position: [number, number, number];
   rotation: [number, number, number];
 }
 
-export const reviewsData: ReviewItem[] = [
-  // Front
-  {
-    id: "review-1",
-    name: "Elena Rostova",
-    role: "Verified VIP Client",
-    rating: 5,
-    review:
-      "The tactile lacquer finish is breathtaking. Unmatched precision in packaging and craftsmanship.",
-    date: "2 days ago",
-    position: [0, 0, 1.5],
-    rotation: [0, 0, 0],
-    url: "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=800&q=80",
-  },
-  // Back
-  {
-    id: "review-2",
-    name: "Marcus Vance",
-    role: "Verified Buyer",
-    rating: 5,
-    review:
-      "CrownCart's bespoke concierge service exceeded every expectation. The timepiece is sublime.",
-    date: "1 week ago",
-    position: [-0.8, 0, -0.6],
-    rotation: [0, 0, 0],
-    url: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=800&q=80",
-  },
-  {
-    id: "review-3",
-    name: "Sophia Chen",
-    role: "Architect & Collector",
-    rating: 5,
-    review:
-      "Pure luxury. The attention to weight, materials, and form is truly exceptional.",
-    date: "2 weeks ago",
-    position: [0.8, 0, -0.6],
-    rotation: [0, 0, 0],
-    url: "https://images.unsplash.com/photo-1509631179647-0177331693ae?auto=format&fit=crop&w=800&q=80",
-  },
-  // Left
-  {
-    id: "review-4",
-    name: "Liam Montgomery",
-    role: "Verified Buyer",
-    rating: 5,
-    review:
-      "A masterclass in modern minimalism. The craftsmanship and durability are unmatched.",
-    date: "3 weeks ago",
-    position: [-1.75, 0, 0.25],
-    rotation: [0, Math.PI / 2.5, 0],
-    url: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=800&q=80",
-  },
-  {
-    id: "review-5",
-    name: "Aria Takahashi",
-    role: "Creative Director",
-    rating: 5,
-    review:
-      "The 01 series capsule arrived flawlessly. In love with the aesthetic and glossy finish.",
-    date: "1 month ago",
-    position: [-2.15, 0, 1.5],
-    rotation: [0, Math.PI / 2.5, 0],
-    url: "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=800&q=80",
-  },
-  {
-    id: "review-6",
-    name: "Oliver Hayes",
-    role: "Verified Buyer",
-    rating: 5,
-    review:
-      "Seamless ordering, lightning fast global shipping, and stunning presentation.",
-    date: "1 month ago",
-    position: [-2, 0, 2.75],
-    rotation: [0, Math.PI / 2.5, 0],
-    url: "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=800&q=80",
-  },
-  // Right
-  {
-    id: "review-7",
-    name: "Claire Delacroix",
-    role: "Interior Stylist",
-    rating: 5,
-    review:
-      "Remarkable sculptural quality. CrownCart sets the gold standard for luxury online.",
-    date: "2 months ago",
-    position: [1.75, 0, 0.25],
-    rotation: [0, -Math.PI / 2.5, 0],
-    url: "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=800&q=80",
-  },
-  {
-    id: "review-8",
-    name: "Julian Sterling",
-    role: "Verified Buyer",
-    rating: 5,
-    review:
-      "Flawless in every metric. The unboxing alone was an unforgettable experience.",
-    date: "2 months ago",
-    position: [2.15, 0, 1.5],
-    rotation: [0, -Math.PI / 2.5, 0],
-    url: "https://images.unsplash.com/photo-1508296695146-257a814070b4?auto=format&fit=crop&w=800&q=80",
-  },
-  {
-    id: "review-9",
-    name: "Amara Okafor",
-    role: "Verified Buyer",
-    rating: 5,
-    review:
-      "Impeccable style and high-end feel. Will definitely be ordering from future drops.",
-    date: "3 months ago",
-    position: [2, 0, 2.75],
-    rotation: [0, -Math.PI / 2.5, 0],
-    url: "https://images.unsplash.com/photo-1546868871-7041f2a55e12?auto=format&fit=crop&w=800&q=80",
-  },
+/** The nine frame positions of the original gallery layout. */
+const SLOTS: { position: [number, number, number]; rotation: [number, number, number] }[] = [
+  { position: [0, 0, 1.5], rotation: [0, 0, 0] },
+  { position: [-0.8, 0, -0.6], rotation: [0, 0, 0] },
+  { position: [0.8, 0, -0.6], rotation: [0, 0, 0] },
+  { position: [-1.75, 0, 0.25], rotation: [0, Math.PI / 2.5, 0] },
+  { position: [-2.15, 0, 1.5], rotation: [0, Math.PI / 2.5, 0] },
+  { position: [-2, 0, 2.75], rotation: [0, Math.PI / 2.5, 0] },
+  { position: [1.75, 0, 0.25], rotation: [0, -Math.PI / 2.5, 0] },
+  { position: [2.15, 0, 1.5], rotation: [0, -Math.PI / 2.5, 0] },
+  { position: [2, 0, 2.75], rotation: [0, -Math.PI / 2.5, 0] },
 ];
+
+interface FeaturedReviews {
+  average: number | null;
+  total: number;
+  reviews: { id: string; name: string; product: string; rating: number; review: string; verifiedPurchase: boolean; createdAt: string; image: string }[];
+}
+
+/** Real published reviews only — customer reviews are never invented. */
+function useFeaturedReviews() {
+  const [data, setData] = useState<FeaturedReviews | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    fetch("/api/catalog/reviews/featured")
+      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+      .then(setData)
+      .catch(() => setFailed(true));
+  }, []);
+  const items: ReviewItem[] = (data?.reviews ?? []).map((r, i) => ({
+    id: r.id,
+    name: r.name,
+    role: r.product,
+    rating: r.rating,
+    review: r.review,
+    date: new Date(r.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
+    url: r.image,
+    verifiedPurchase: r.verifiedPurchase,
+    ...SLOTS[i],
+  }));
+  return { data, items, failed };
+}
 
 function Frame({
   item,
@@ -244,7 +173,7 @@ function Frame({
           color="#e8c07d"
           letterSpacing={0.05}
         >
-          {"★".repeat(item.rating)} 5.0
+          {"★".repeat(item.rating)} {item.rating}.0
         </Text>
         <Text
           position={[0, -0.13, 0]}
@@ -315,7 +244,8 @@ function Frames({
 
 export function ReviewsGallery({ onClose }: { onClose: () => void }) {
   const [activeId, setActiveId] = useState<string | null>(null);
-  const activeReview = reviewsData.find((r) => r.id === activeId);
+  const { data, items, failed } = useFeaturedReviews();
+  const activeReview = items.find((r) => r.id === activeId);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -355,7 +285,7 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
         <directionalLight position={[-10, 10, -5]} intensity={1.5} color="#e8c07d" />
         <group position={[0, -0.5, 0]}>
           <Frames
-            items={reviewsData}
+            items={items}
             activeId={activeId}
             onSelect={(id) => setActiveId(id || null)}
             onReset={() => setActiveId(null)}
@@ -417,7 +347,14 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
               marginTop: 2,
             }}
           >
-            Client Reviews & 3D Gallery &mdash; 5.0 ★ (9 Curated Stories)
+            Client Reviews & 3D Gallery &mdash;{" "}
+            {data == null
+              ? failed
+                ? "Reviews are unavailable right now"
+                : "Loading reviews…"
+              : data.total === 0
+                ? "No reviews yet"
+                : `${data.average} ★ average across ${data.total} published review${data.total === 1 ? "" : "s"}`}
           </div>
         </div>
 
@@ -453,6 +390,30 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
           &larr; Back to Showcase
         </button>
       </div>
+
+      {data && data.total === 0 && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+            zIndex: 205,
+            color: "#dddddd",
+            textAlign: "center",
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 14,
+            lineHeight: 1.6,
+          }}
+        >
+          <div>
+            <div style={{ fontFamily: "'Antonio', sans-serif", fontSize: 28, color: "#ffffff" }}>No reviews yet</div>
+            Reviews from CrownCart customers will appear here once they are published.
+          </div>
+        </div>
+      )}
 
       {/* Reviewer Quick Navigation Pills at Bottom */}
       <div
@@ -491,7 +452,7 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
         >
           Overview (All Frames)
         </button>
-        {reviewsData.map((rev) => (
+        {items.map((rev) => (
           <button
             key={rev.id}
             type="button"
@@ -522,7 +483,7 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
               }
             }}
           >
-            {rev.name} ★ 5.0
+            {rev.name} ★ {rev.rating}.0
           </button>
         ))}
       </div>
@@ -606,7 +567,7 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
                 fontWeight: 600,
               }}
             >
-              &#10003; Verified Purchase
+              {activeReview.verifiedPurchase ? <>&#10003; Verified Purchase</> : null}
             </span>
             <button
               type="button"

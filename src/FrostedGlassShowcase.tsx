@@ -1,4 +1,50 @@
-import { useRef, useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "./lib/auth";
+import { inr } from "./lib/format";
+import { HomeDataContext, type HomeData, type LiveProduct } from "./lib/homeData";
+import { ExploreMoreSection } from "./HomeSections";
+
+
+function ratingText(live: LiveProduct | undefined) {
+  if (!live) return "";
+  if (live.rating == null) return "No reviews yet";
+  return `${live.rating} ★ (${live.reviewCount} review${live.reviewCount === 1 ? "" : "s"})`;
+}
+
+/** The showcase button: adds single-variant products to the bag, otherwise opens the product page to pick a size. */
+function AcquireButton({ live, name, style, hover }: { live?: LiveProduct; name: string; style: React.CSSProperties; hover: [React.CSSProperties, React.CSSProperties] }) {
+  const { addToCart } = useAuth();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [added, setAdded] = useState(false);
+  const needsChoice = !live || live.variantCount > 1 || !live.inStock || !live.defaultVariantId;
+  const label = !live ? "ACQUIRE NOW" : !live.inStock ? "VIEW DETAILS" : live.variantCount > 1 ? "SELECT SIZE" : added ? "ADDED TO CROWN BAG ✓" : "ACQUIRE NOW";
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      aria-busy={busy || undefined}
+      onClick={async () => {
+        if (!live) return;
+        if (needsChoice) return navigate(`/product/${live.slug}`);
+        setBusy(true);
+        const ok = await addToCart(live.defaultVariantId!, 1, { productName: name, returnTo: `/#product-${live.slug}` });
+        setBusy(false);
+        if (ok) {
+          setAdded(true);
+          setTimeout(() => setAdded(false), 2500);
+        }
+      }}
+      style={style}
+      onMouseEnter={(e) => Object.assign(e.currentTarget.style, hover[0])}
+      onMouseLeave={(e) => Object.assign(e.currentTarget.style, hover[1])}
+    >
+      <span>{busy ? "ADDING…" : label}</span>
+      <span style={{ fontSize: "14px" }}>→</span>
+    </button>
+  );
+}
 
 export interface ProductItem {
   id: string;
@@ -10,7 +56,6 @@ export interface ProductItem {
   category: string;
   price: string;
   priceSub?: string;
-  rating: string;
   badge: string;
   image: string;
   description: string;
@@ -27,7 +72,6 @@ export const PRODUCTS: ProductItem[] = [
     accent: "HIGH OG",
     category: "Heritage Basketball & Luxury Sneaker Culture",
     price: "₹16,995",
-    rating: "4.9 ★ (2,410 Reviews)",
     badge: "ICONIC GRAIL",
     image: "/products/jordan_bg_hd.png",
     description:
@@ -49,7 +93,6 @@ export const PRODUCTS: ProductItem[] = [
     category: "Haute Horlogerie & Self-Winding Flyback Chronograph",
     price: "₹1,85,00,000",
     priceSub: "MARKET VALUATION: ₹1.85 CR",
-    rating: "5.0 ★ (188 Verified Collectors)",
     badge: "HAUTE HORLOGERIE",
     image: "/products/nautilus_bg_hd.png",
     description:
@@ -70,7 +113,6 @@ export const PRODUCTS: ProductItem[] = [
     accent: "BOMBER",
     category: "Milanese Designer Outerwear & Street Tailoring",
     price: "₹24,999",
-    rating: "4.8 ★ (860 Reviews)",
     badge: "NEW ARRIVAL",
     image: "/products/ax_bomber_bg_hd.png",
     description:
@@ -91,7 +133,6 @@ export const PRODUCTS: ProductItem[] = [
     accent: "A15 PRO",
     category: "High-Performance Military-Grade Gaming Workstation",
     price: "₹89,990",
-    rating: "4.9 ★ (3,420 Reviews)",
     badge: "TOP RATED",
     image: "/products/asus_tuf_bg_hd.png",
     description:
@@ -256,7 +297,8 @@ interface LuxuryProductSectionProps {
 }
 
 export function LuxuryProductShowcaseSection({ product, index }: LuxuryProductSectionProps) {
-  const [copied, setCopied] = useState(false);
+  const home = useContext(HomeDataContext);
+  const live = home?.showcase[index];
 
   const openReviews = () => {
     window.dispatchEvent(new CustomEvent("crowncart-open-reviews"));
@@ -585,8 +627,12 @@ export function LuxuryProductShowcaseSection({ product, index }: LuxuryProductSe
                   letterSpacing: "0.5px",
                 }}
               >
-                {product.price}
+                {live ? inr(live.pricePaise) : product.price}
               </div>
+
+              {live?.compareAtPaise && (
+                <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", textDecoration: "line-through" }}>{inr(live.compareAtPaise)}</span>
+              )}
 
               {product.priceSub && (
                 <span
@@ -614,10 +660,16 @@ export function LuxuryProductShowcaseSection({ product, index }: LuxuryProductSe
                   fontWeight: 500,
                   cursor: "pointer",
                 }}
-                title="View verified reviews"
+                title="View customer reviews"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && openReviews()}
               >
-                {product.rating}
+                {ratingText(live)}
               </span>
+              {live && !live.inStock && (
+                <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "1px", color: "#ffb4ab", textTransform: "uppercase" }}>Out of stock</span>
+              )}
             </div>
 
             {/* Description Paragraph */}
@@ -675,13 +727,10 @@ export function LuxuryProductShowcaseSection({ product, index }: LuxuryProductSe
             </div>
 
             {/* Action Button: ACQUIRE NOW */}
-            <div>
-              <button
-                type="button"
-                onClick={() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }}
+            <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+              <AcquireButton
+                live={live}
+                name={`${product.title1} ${product.title2}`.replace(/[“”"]/g, "")}
                 style={{
                   cursor: "pointer",
                   padding: "9px 20px",
@@ -700,591 +749,42 @@ export function LuxuryProductShowcaseSection({ product, index }: LuxuryProductSe
                   transition: "all 0.15s ease",
                   boxShadow: "0 4px 14px rgba(0, 0, 0, 0.4)",
                 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = "#161616";
-                  e.currentTarget.style.borderColor = "#ffffff";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = "#000000";
-                  e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.55)";
-                }}
-              >
-                <span>{copied ? "ADDED TO CROWN BAG ✓" : "ACQUIRE NOW"}</span>
-                <span style={{ fontSize: "14px" }}>→</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* Single Stacked Product Section */
-interface ProductSectionProps {
-  product: ProductItem;
-  index: number;
-}
-
-export function ProductSection({ product, index }: ProductSectionProps) {
-  const [copied, setCopied] = useState(false);
-  const sectionRef = useRef<HTMLElement>(null!);
-  const [scrollRel, setScrollRel] = useState(0);
-
-  // Top-Tier Scroll Animation telemetry
-  useEffect(() => {
-    let ticking = false;
-    const handleScroll = () => {
-      if (!ticking) {
-        window.requestAnimationFrame(() => {
-          if (sectionRef.current) {
-            const rect = sectionRef.current.getBoundingClientRect();
-            const mid = rect.top + rect.height / 2;
-            const center = window.innerHeight / 2;
-            // -1 when above center, 0 when centered, +1 when below center
-            const rel = (mid - center) / (window.innerHeight * 0.7);
-            setScrollRel(Math.max(-1.5, Math.min(1.5, rel)));
-          }
-          ticking = false;
-        });
-        ticking = true;
-      }
-    };
-
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    handleScroll();
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  // Parallax shifts
-  const bgNumberOffset = scrollRel * -45;
-
-  return (
-    <section
-      ref={sectionRef}
-      id={`product-${product.id}`}
-      style={{
-        position: "relative",
-        width: "100vw",
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: index % 2 === 0 ? "#d2d2d2" : "#c8c8c8",
-        borderBottom: "1px solid rgba(0, 0, 0, 0.06)",
-        padding: "80px 40px",
-        overflow: "visible",
-      }}
-    >
-      {/* Background Parallax Luxury Numeral */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          top: "15%",
-          left: "6%",
-          fontFamily: "'Antonio', sans-serif",
-          fontSize: "clamp(120px, 22vw, 280px)",
-          fontWeight: 700,
-          color: "rgba(0, 0, 0, 0.04)",
-          lineHeight: 0.8,
-          transform: `translateY(${bgNumberOffset}px)`,
-          transition: "transform 0.1s linear",
-          userSelect: "none",
-          pointerEvents: "none",
-          zIndex: 1,
-        }}
-      >
-        {product.num}
-      </div>
-
-      <div
-        style={{
-          width: "100%",
-          maxWidth: "720px",
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "48px",
-          position: "relative",
-          zIndex: 2,
-        }}
-      >
-        {/* pmndrs Info Specifications Panel */}
-        <div
-          style={{
-            flex: "1 1 50%",
-            width: "100%",
-            maxWidth: "720px",
-            boxSizing: "border-box",
-            borderLeft: "1.5px solid rgba(0, 0, 0, 0.85)",
-            paddingLeft: "40px",
-            userSelect: "none",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-          }}
-        >
-          {/* Number + Badge */}
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "8px" }}>
-            <h1
-              style={{
-                fontFamily: "'Major Mono Display', monospace",
-                fontSize: "2.6em",
-                margin: 0,
-                color: "#111111",
-                fontWeight: 400,
-              }}
-            >
-              {product.num}
-            </h1>
-            <span
-              style={{
-                fontSize: "11px",
-                fontWeight: 700,
-                letterSpacing: "1.5px",
-                textTransform: "uppercase",
-                padding: "5px 12px",
-                backgroundColor: "rgba(0,0,0,0.06)",
-                borderRadius: "4px",
-                color: "#111111",
-              }}
-            >
-              {product.badge}
-            </span>
-          </div>
-
-          {/* Typography Titles */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 0, overflow: "hidden" }}>
-            <h3
-              style={{
-                fontWeight: 800,
-                fontSize: "4.2em",
-                letterSpacing: "-4px",
-                lineHeight: "0.95em",
-                margin: 0,
-                color: "#111111",
-              }}
-            >
-              {product.title1}
-            </h3>
-            <h3
-              style={{
-                fontWeight: 800,
-                fontSize: "4.2em",
-                letterSpacing: "-4px",
-                lineHeight: "0.95em",
-                margin: 0,
-                color: "#111111",
-              }}
-            >
-              {product.title2}
-            </h3>
-            <h3
-              style={{
-                fontWeight: 800,
-                fontSize: "4.2em",
-                letterSpacing: "-4px",
-                lineHeight: "0.95em",
-                margin: 0,
-              }}
-            >
-              <span
-                className="accent"
-                style={{
-                  WebkitTextStroke: "1px black",
-                  color: "transparent",
-                }}
-              >
-                {product.accent}
-              </span>
-            </h3>
-
-            <h4
-              style={{
-                fontWeight: 400,
-                fontSize: "1.15em",
-                letterSpacing: "-0.5px",
-                margin: "12px 0 8px 0",
-                color: "#333333",
-              }}
-            >
-              {product.category}
-            </h4>
-
-            {/* Indian Rupee Price + Rating */}
-            <div style={{ display: "flex", alignItems: "center", gap: "14px", margin: "8px 0 14px 0", flexWrap: "wrap" }}>
-              <div
-                className="price"
-                style={{
-                  fontFamily: "'Major Mono Display', monospace",
-                  fontSize: "1.35em",
-                  backgroundColor: "#111111",
-                  color: "#ffffff",
-                  padding: "6px 14px",
-                  borderRadius: "6px",
-                  letterSpacing: "0.5px",
-                }}
-              >
-                {product.price}
-              </div>
-              {product.priceSub && (
-                <span
-                  style={{
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    letterSpacing: "1px",
-                    color: "#666666",
-                    padding: "4px 8px",
-                    backgroundColor: "rgba(0,0,0,0.05)",
-                    borderRadius: "4px",
-                  }}
-                >
-                  {product.priceSub}
-                </span>
+                hover={[
+                  { backgroundColor: "#161616", borderColor: "#ffffff" },
+                  { backgroundColor: "#000000", borderColor: "rgba(255, 255, 255, 0.55)" },
+                ]}
+              />
+              {live && (
+                <Link to={`/product/${live.slug}`} style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", letterSpacing: "1.5px", textTransform: "uppercase", textDecoration: "underline", textUnderlineOffset: "4px" }}>
+                  Details
+                </Link>
               )}
-              <span style={{ fontSize: "13px", color: "#555555", fontWeight: 500 }}>
-                {product.rating}
-              </span>
-            </div>
-
-            {/* Description */}
-            <p
-              style={{
-                fontSize: "14px",
-                lineHeight: "1.65em",
-                color: "#444444",
-                marginBottom: "16px",
-                maxWidth: "520px",
-              }}
-            >
-              {product.description}
-            </p>
-
-            {/* Specifications Grid */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "8px 16px",
-                padding: "12px 0",
-                borderTop: "1px solid rgba(0, 0, 0, 0.12)",
-                borderBottom: "1px solid rgba(0, 0, 0, 0.12)",
-                marginBottom: "18px",
-              }}
-            >
-              {product.specs.map((s, idx) => (
-                <div key={idx}>
-                  <div style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "1px", color: "#666666" }}>
-                    {s.label}
-                  </div>
-                  <div style={{ fontSize: "12px", fontWeight: 600, color: "#111111", marginTop: "2px" }}>
-                    {s.val}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Action Row */}
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }}
-                style={{
-                  cursor: "pointer",
-                  padding: "11px 24px",
-                  backgroundColor: "#111111",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "6px",
-                  fontFamily: "'Inter', sans-serif",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  letterSpacing: "1px",
-                  textTransform: "uppercase",
-                  transition: "all 0.15s ease",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#2b2b2b")}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#111111")}
-              >
-                {copied ? "ADDED TO CROWN BAG ✓" : "ACQUIRE NOW"}
-              </button>
             </div>
           </div>
         </div>
-
       </div>
     </section>
   );
 }
 
-/* Explore More Section (Placed at last in middle) */
-export function ExploreMoreSection() {
-  const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const openReviews = () => {
-    window.dispatchEvent(new CustomEvent("crowncart-open-reviews"));
-  };
-
-  const openDirectory = () => {
-    window.dispatchEvent(new CustomEvent("crowncart-open-directory"));
-  };
-
-  return (
-    <section
-      id="explore-more"
-      style={{
-        position: "relative",
-        width: "100vw",
-        minHeight: "90vh",
-        backgroundColor: "#111113",
-        color: "#ffffff",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "80px 40px",
-        textAlign: "center",
-        boxSizing: "border-box",
-      }}
-    >
-      {/* CrownCart Crest & Title */}
-      <div style={{ maxWidth: "800px", margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <div
-          style={{
-            fontSize: "20px",
-            marginBottom: "12px",
-            filter: "drop-shadow(0 2px 8px rgba(255, 215, 0, 0.4))",
-          }}
-        >
-          👑
-        </div>
-        <p
-          style={{
-            fontSize: "12px",
-            fontWeight: 700,
-            letterSpacing: "3px",
-            textTransform: "uppercase",
-            color: "rgba(255, 255, 255, 0.5)",
-            marginBottom: "12px",
-          }}
-        >
-          THE PINNACLE OF CURATED LUXURY
-        </p>
-
-        <h2
-          style={{
-            fontFamily: "'Antonio', sans-serif",
-            fontSize: "clamp(48px, 8vw, 76px)",
-            fontWeight: 700,
-            letterSpacing: "-1px",
-            lineHeight: "1.05em",
-            margin: "0 0 20px 0",
-            color: "#ffffff",
-          }}
-        >
-          THE CROWN OF DISCOVERY
-        </h2>
-
-        <p
-          style={{
-            fontFamily: "'Inter', sans-serif",
-            fontSize: "16px",
-            lineHeight: "1.6em",
-            color: "rgba(255, 255, 255, 0.7)",
-            maxWidth: "600px",
-            margin: "0 0 36px 0",
-          }}
-        >
-          Step beyond the specimen preview. Discover over 5,000 authenticated luxury footwear icons,
-          rare Geneva horology, bespoke Milanese tailoring, and high-performance gaming workstations.
-        </p>
-
-        {/* Centered Primary Explore More Button */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", marginBottom: "48px" }}>
-          <button
-            type="button"
-            onClick={openDirectory}
-            style={{
-              cursor: "pointer",
-              fontFamily: "'Inter', sans-serif",
-              fontSize: "14px",
-              fontWeight: 700,
-              letterSpacing: "2px",
-              textTransform: "uppercase",
-              padding: "16px 44px",
-              backgroundColor: "#ffffff",
-              color: "#111111",
-              border: "none",
-              borderRadius: "32px",
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-              boxShadow: "0 8px 30px rgba(255, 255, 255, 0.25)",
-              transition: "all 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = "#e0e0e0";
-              e.currentTarget.style.transform = "scale(1.05)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = "#ffffff";
-              e.currentTarget.style.transform = "scale(1)";
-            }}
-          >
-            <span>EXPLORE MORE</span>
-            <span style={{ fontSize: "16px" }}>→</span>
-          </button>
-
-          <span style={{ fontSize: "11px", letterSpacing: "1px", color: "rgba(255,255,255,0.4)" }}>
-            ESTABLISHED IN 2026 ● PRIVATE CONCIERGE & GLOBAL EXPEDITION
-          </span>
-        </div>
-
-        {/* 4 Category Discovery Cards in the Middle */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: "16px",
-            width: "100%",
-            maxWidth: "840px",
-            marginBottom: "50px",
-          }}
-        >
-          {[
-            { id: "01", name: "Sneaker Culture", count: "1,420+ Pairs", icon: "👟" },
-            { id: "02", name: "Haute Horology", count: "890+ Timepieces", icon: "⌚" },
-            { id: "03", name: "Designer Outerwear", count: "540+ Pieces", icon: "🧥" },
-            { id: "04", name: "Pro Gaming & Tech", count: "320+ Systems", icon: "💻" },
-          ].map((cat) => (
-            <div
-              key={cat.id}
-              style={{
-                backgroundColor: "rgba(255, 255, 255, 0.04)",
-                border: "1px solid rgba(255, 255, 255, 0.08)",
-                borderRadius: "16px",
-                padding: "20px 16px",
-                textAlign: "center",
-                transition: "all 0.2s ease",
-                cursor: "pointer",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.08)";
-                e.currentTarget.style.transform = "translateY(-4px)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.04)";
-                e.currentTarget.style.transform = "translateY(0)";
-              }}
-              onClick={openDirectory}
-            >
-              <div style={{ fontSize: "24px", marginBottom: "8px" }}>{cat.icon}</div>
-              <div style={{ fontSize: "14px", fontWeight: 700, color: "#ffffff", marginBottom: "4px" }}>
-                {cat.name}
-              </div>
-              <div style={{ fontSize: "11px", color: "rgba(255, 255, 255, 0.45)" }}>
-                {cat.count}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Action Row */}
-        <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap", justifyContent: "center" }}>
-          <button
-            type="button"
-            onClick={openReviews}
-            style={{
-              cursor: "pointer",
-              padding: "10px 22px",
-              backgroundColor: "transparent",
-              color: "#ffffff",
-              border: "1px solid rgba(255, 255, 255, 0.25)",
-              borderRadius: "20px",
-              fontSize: "12px",
-              fontWeight: 600,
-              letterSpacing: "1px",
-              transition: "all 0.15s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = "#ffffff";
-              e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.08)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.25)";
-              e.currentTarget.style.backgroundColor = "transparent";
-            }}
-          >
-            VIEW 3D CLIENT REVIEWS ★
-          </button>
-
-          <button
-            type="button"
-            onClick={scrollToTop}
-            style={{
-              cursor: "pointer",
-              padding: "10px 22px",
-              backgroundColor: "rgba(255, 255, 255, 0.1)",
-              color: "#ffffff",
-              border: "1px solid rgba(255, 255, 255, 0.15)",
-              borderRadius: "20px",
-              fontSize: "12px",
-              fontWeight: 600,
-              letterSpacing: "1px",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              transition: "all 0.15s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = "#ffffff";
-              e.currentTarget.style.color = "#111111";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.1)";
-              e.currentTarget.style.color = "#ffffff";
-            }}
-          >
-            <span>↑ BACK TO TOP</span>
-          </button>
-        </div>
-
-        {/* Footer info */}
-        <div
-          style={{
-            marginTop: "60px",
-            fontSize: "11px",
-            color: "rgba(255, 255, 255, 0.35)",
-            letterSpacing: "1px",
-          }}
-        >
-          © 2026 CROWNCART LUXURY COLLECTIVE • ALL RIGHTS RESERVED
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* Master Stacked Showcase of all 4 Products + Explore More + Telemetry Rail */
+/* Master stacked showcase: products, closing sections and the telemetry rail */
 export function StackedProductsShowcase() {
+  const [home, setHome] = useState<HomeData | null>(null);
+  useEffect(() => {
+    fetch("/api/catalog/home")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setHome)
+      .catch(() => {});
+  }, []);
   return (
-    <div style={{ width: "100%", overflow: "visible", position: "relative" }}>
-      <SpecimenScrollRail />
-      {PRODUCTS.map((product, idx) => (
-        <LuxuryProductShowcaseSection
-          key={product.id}
-          product={product}
-          index={idx}
-        />
-      ))}
-      <ExploreMoreSection />
-    </div>
+    <HomeDataContext.Provider value={home}>
+      <div style={{ width: "100%", overflow: "visible", position: "relative" }}>
+        <SpecimenScrollRail />
+        {PRODUCTS.map((product, idx) => (
+          <LuxuryProductShowcaseSection key={product.id} product={product} index={idx} />
+        ))}
+        <ExploreMoreSection />
+      </div>
+    </HomeDataContext.Provider>
   );
 }

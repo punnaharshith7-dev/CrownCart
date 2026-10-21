@@ -250,6 +250,7 @@ export const catalogRoutes = new Hono<AppEnv>()
         description: p.description,
         specs,
         defaultVariantId: variant?.id ?? null,
+        variantCount: db.get<{ n: number }>("SELECT COUNT(*) n FROM product_variants WHERE product_id = ? AND is_active = 1", [r.id])!.n,
       };
     });
     const f = facets(db);
@@ -447,6 +448,35 @@ export const catalogRoutes = new Hono<AppEnv>()
     ]);
     if (!r.changes) throw notFound();
     return c.json({ ok: true });
+  })
+
+  /** Real, published reviews for the homepage gallery. Nothing is invented. */
+  .get("/reviews/featured", (c) => {
+    const db = c.get("db");
+    const rows = db.all(
+      `SELECT r.id, r.rating, r.title, r.body, r.verified_purchase, r.created_at, u.name, p.name AS product, p.slug,
+              (SELECT url FROM product_media m WHERE m.product_id = p.id AND m.kind IN ('hero','image') ORDER BY m.kind = 'hero' DESC, m.sort_order LIMIT 1) AS image
+         FROM reviews r JOIN users u ON u.id = r.user_id JOIN products p ON p.id = r.product_id
+        WHERE r.status = 'published' AND p.status = 'active'
+        ORDER BY r.verified_purchase DESC, r.helpful_count DESC, r.created_at DESC LIMIT 9`,
+    );
+    const agg = db.get("SELECT AVG(rating) avg, COUNT(*) n FROM reviews WHERE status = 'published'")!;
+    return c.json({
+      average: agg.avg == null ? null : Math.round(agg.avg * 10) / 10,
+      total: agg.n,
+      reviews: rows.map((r) => ({
+        id: String(r.id),
+        name: r.name.split(" ")[0],
+        product: r.product,
+        productSlug: r.slug,
+        rating: r.rating,
+        title: r.title,
+        review: r.body,
+        verifiedPurchase: Boolean(r.verified_purchase),
+        createdAt: r.created_at,
+        image: r.image,
+      })),
+    });
   })
 
   .get("/collections", (c) => {
