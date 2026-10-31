@@ -38,3 +38,8 @@ public/uploads/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local test leftovers
+make_shoe_test.cjs
+test_shoe_compare.cjs
+public/test_shoe_*
