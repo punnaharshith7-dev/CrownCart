@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { type GLTF } from "three-stdlib";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Environment, useEnvironment, useGLTF } from "@react-three/drei";
@@ -71,6 +71,8 @@ function Bauble({
   }, [scale]);
 
   useFrame((_state, delta) => {
+    // The physics body can arrive a frame after the scene starts.
+    if (!api.current) return;
     delta = Math.min(0.1, delta);
     api.current.applyImpulse(
       vec
@@ -146,43 +148,83 @@ function Pointer({ vec = new THREE.Vector3() }: { vec?: THREE.Vector3 }) {
   );
 }
 
-export const App = () => (
-  <Canvas
-    shadows
-    gl={{ alpha: true, stencil: false, depth: false, antialias: false }}
-    camera={{ position: [0, 0, 20], fov: 32.5, near: 1, far: 100 }}
-    onCreated={(state) => (state.gl.toneMappingExposure = 1.5)}
-  >
-    <ambientLight intensity={Math.PI} />
-    <spotLight
-      position={[20, 20, 25]}
-      intensity={Math.PI}
-      decay={0}
-      penumbra={1}
-      angle={0.2}
-      color="white"
-      castShadow
-      shadow-mapSize={[512, 512]}
-    />
-    <directionalLight position={[0, 5, -4]} intensity={4 * Math.PI} />
-    <directionalLight
-      position={[0, -15, -0]}
-      intensity={4 * Math.PI}
-      color="red"
-    />
-    <Physics gravity={[0, 0, 0]}>
-      <Pointer />
-      {baubles.map((props, i) => (
-        <Bauble key={i} {...props} />
-      ))}
-    </Physics>
-    <Environment files={adamsbridgeHdr} />
-    <EffectComposer enableNormalPass={false}>
-      <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-      <N8AO color="red" aoRadius={2} distanceFalloff={2.5} intensity={1} />
-    </EffectComposer>
-  </Canvas>
-);
+export const App = () => {
+  const [isScrolling, setIsScrolling] = useState(false);
+  const [isHeroVisible, setIsHeroVisible] = useState(true);
+  const scrollActive = useRef(false);
+
+  useEffect(() => {
+    let scrollEndTimer = 0;
+    const handleScroll = () => {
+      if (!scrollActive.current) {
+        scrollActive.current = true;
+        setIsScrolling(true);
+      }
+      window.clearTimeout(scrollEndTimer);
+      scrollEndTimer = window.setTimeout(() => {
+        scrollActive.current = false;
+        setIsScrolling(false);
+      }, 180);
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      window.clearTimeout(scrollEndTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const hero = document.getElementById("hero");
+    if (!hero || !("IntersectionObserver" in window)) return;
+
+    const observer = new IntersectionObserver(([entry]) => {
+      setIsHeroVisible(entry.isIntersecting);
+    });
+    observer.observe(hero);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <Canvas
+      shadows
+      dpr={[1, 1.5]}
+      frameloop={isScrolling || !isHeroVisible ? "demand" : "always"}
+      gl={{ alpha: true, stencil: false, depth: false, antialias: false, preserveDrawingBuffer: true }}
+      camera={{ position: [0, 0, 20], fov: 32.5, near: 1, far: 100 }}
+      onCreated={(state) => (state.gl.toneMappingExposure = 1.5)}
+    >
+      <ambientLight intensity={Math.PI} />
+      <spotLight
+        position={[20, 20, 25]}
+        intensity={Math.PI}
+        decay={0}
+        penumbra={1}
+        angle={0.2}
+        color="white"
+        castShadow
+        shadow-mapSize={[512, 512]}
+      />
+      <directionalLight position={[0, 5, -4]} intensity={4 * Math.PI} />
+      <directionalLight
+        position={[0, -15, -0]}
+        intensity={4 * Math.PI}
+        color="red"
+      />
+      <Physics gravity={[0, 0, 0]}>
+        <Pointer />
+        {baubles.map((props, i) => (
+          <Bauble key={i} {...props} />
+        ))}
+      </Physics>
+      <Environment files={adamsbridgeHdr} />
+      <EffectComposer enableNormalPass={false}>
+        <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
+        <N8AO color="red" aoRadius={2} distanceFalloff={2.5} intensity={1} />
+      </EffectComposer>
+    </Canvas>
+  );
+};
 
 useGLTF.preload(capModel);
 useEnvironment.preload({ files: adamsbridgeHdr });

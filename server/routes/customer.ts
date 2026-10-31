@@ -1,3 +1,4 @@
+import { pincodeStateError } from "../../src/lib/pincodes.ts";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../context.ts";
@@ -84,6 +85,9 @@ const addressSchema = z.object({
   state: z.string().trim().min(2, "Enter the state.").max(60),
   pincode,
   isDefault: z.boolean().default(false),
+}).superRefine((a, ctx) => {
+  const err = pincodeStateError(a.pincode, a.state);
+  if (err) ctx.addIssue({ code: "custom", path: ["pincode"], message: err });
 });
 
 const mapAddress = (a: any) => ({
@@ -223,14 +227,23 @@ export const wishlistRoutes = new Hono<AppEnv>()
     return c.json({ ok: true, cart: summarizeCart(db, u.id) });
   });
 
+const GENDERS = ["female", "male", "non_binary", "prefer_not_to_say"] as const;
+
 export const accountRoutes = new Hono<AppEnv>()
   .get("/profile", (c) => {
     const u = requireUser(c);
-    const row = c.get("db").get("SELECT email, name, phone, email_verified_at, preferences, created_at, password_hash IS NOT NULL AS has_password, google_sub IS NOT NULL AS google FROM users WHERE id = ?", [u.id])!;
+    const row = c.get("db").get(
+      "SELECT email, name, phone, age, gender, height_cm, weight_kg, email_verified_at, preferences, created_at, password_hash IS NOT NULL AS has_password, google_sub IS NOT NULL AS google FROM users WHERE id = ?",
+      [u.id],
+    )!;
     return c.json({
       email: row.email,
       name: row.name,
       phone: row.phone,
+      age: row.age,
+      gender: row.gender,
+      heightCm: row.height_cm,
+      weightKg: row.weight_kg,
       emailVerified: Boolean(row.email_verified_at),
       preferences: JSON.parse(row.preferences),
       memberSince: row.created_at,
@@ -241,12 +254,39 @@ export const accountRoutes = new Hono<AppEnv>()
 
   .patch("/profile", async (c) => {
     const u = requireUser(c);
-    const input = await body(c, z.object({ name: z.string().trim().min(2).max(80).optional(), phone: phone.or(z.literal("")).optional() }));
-    const db = c.get("db");
-    db.run(
-      "UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
-      [input.name ?? null, input.phone === undefined ? null : input.phone || null, u.id],
+    // Omitted fields are left as they are; null clears an optional detail.
+    const input = await body(
+      c,
+      z.object({
+        name: z.string().trim().min(2, "Enter your name.").max(80).optional(),
+        phone: phone.or(z.literal("")).nullable().optional(),
+        age: z.number().int().min(13, "You must be at least 13.").max(120, "Enter a valid age.").nullable().optional(),
+        gender: z.enum(GENDERS).nullable().optional(),
+        heightCm: z.number().min(50, "Height must be between 50 and 272 cm.").max(272, "Height must be between 50 and 272 cm.").nullable().optional(),
+        weightKg: z.number().min(10, "Weight must be between 10 and 400 kg.").max(400, "Weight must be between 10 and 400 kg.").nullable().optional(),
+      }),
     );
+    const db = c.get("db");
+    const sets: string[] = [];
+    const args: (string | number | null)[] = [];
+    const put = (col: string, v: string | number | null) => (sets.push(`${col} = ?`), args.push(v));
+    if (input.name !== undefined) put("name", input.name);
+    if (input.phone !== undefined) put("phone", input.phone || null);
+    if (input.age !== undefined) put("age", input.age);
+    if (input.gender !== undefined) put("gender", input.gender);
+    if (input.heightCm !== undefined) put("height_cm", input.heightCm === null ? null : Math.round(input.heightCm * 10) / 10);
+    if (input.weightKg !== undefined) put("weight_kg", input.weightKg === null ? null : Math.round(input.weightKg * 10) / 10);
+    db.run(
+      `UPDATE users SET ${[...sets, "profile_prompted_at = COALESCE(profile_prompted_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))", "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')"].join(", ")} WHERE id = ?`,
+      [...args, u.id],
+    );
+    return c.json({ ok: true });
+  })
+
+  // "Skip for now" on the sign-up profile step.
+  .post("/profile/skip", (c) => {
+    const u = requireUser(c);
+    c.get("db").run("UPDATE users SET profile_prompted_at = COALESCE(profile_prompted_at, strftime('%Y-%m-%dT%H:%M:%fZ','now')) WHERE id = ?", [u.id]);
     return c.json({ ok: true });
   })
 

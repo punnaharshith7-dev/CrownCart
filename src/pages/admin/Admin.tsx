@@ -7,9 +7,11 @@ import { useAuth } from "../../lib/auth";
 import { date, dateTime, inr, relative, titleCase } from "../../lib/format";
 import { useToast } from "../../lib/toast";
 import { useApi } from "../../lib/useApi";
-import { OrderLines, OrderTimeline, ShipmentTracking, type OrderDetail } from "../account/Account";
+import { OrderLines, OrderTimeline, ShipmentTracking, TrackLine, type OrderDetail } from "../account/Account";
 import { formatAddress } from "../../components/AddressForm";
+import { ReviewPhotos } from "../../components/ReviewForm";
 import { AdminReports, CategoriesAdmin, CouponsAdmin, GiftCardsAdmin, MessagesAdmin, SettingsPages } from "./AdminExtras";
+import { ProductEditor } from "../owner/Owner";
 
 function useAction() {
   const toast = useToast();
@@ -77,7 +79,6 @@ function Dashboard() {
             [c.awaitingAssignment, "shipments awaiting a partner", "/admin/delivery"],
             [c.pendingStores, "stores awaiting approval", "/admin/stores"],
             [c.returnsOpen, "open returns", "/admin/orders?status=return_requested"],
-            [c.pendingReviews, "reviews to moderate", "/admin/reviews"],
             [c.openTickets, "open support tickets", "/admin/support"],
           ].map(([n, l, to]) => (
             <Link key={l as string} to={to as string} className="spread small">
@@ -190,13 +191,13 @@ function Users() {
 function InviteModal({ onClose, storeId }: { onClose: () => void; storeId?: number }) {
   const stores = useApi<{ stores: any[] }>("/admin/stores");
   const toast = useToast();
-  const [f, setF] = useState({ email: "", role: storeId ? "store_owner" : "delivery_partner", storeId: storeId ? String(storeId) : "" });
+  const [f, setF] = useState({ email: "", role: storeId ? "store_owner" : "delivery_partner", storeIds: storeId ? [storeId] : ([] as number[]) });
   const [link, setLink] = useState<string | null>(null);
   return (
     <Modal title="Invite staff" onClose={onClose}>
       {link ? (
         <div className="stack">
-          <div className="alert alert-warning">Email isn't configured, so the invitation wasn't sent. Share this development link securely:</div>
+          <div className="alert alert-warning">Email isn't set up, so the invitation wasn't emailed. Share this link with them securely:</div>
           <code className="panel small" style={{ wordBreak: "break-all" }}>
             {location.origin + link}
           </code>
@@ -209,10 +210,11 @@ function InviteModal({ onClose, storeId }: { onClose: () => void; storeId?: numb
           className="stack"
           onSubmit={async (e) => {
             e.preventDefault();
+            if (f.role === "store_owner" && !f.storeIds.length) return toast("Choose at least one store.", "error");
             try {
-              const r = await api.post<{ devInviteUrl?: string }>("/admin/invitations", { email: f.email, role: f.role, storeId: f.role === "store_owner" ? Number(f.storeId) : null });
+              const r = await api.post<{ devInviteUrl?: string }>("/admin/invitations", { email: f.email, role: f.role, storeIds: f.role === "store_owner" ? f.storeIds : [] });
               if (r.devInviteUrl) setLink(r.devInviteUrl);
-              else (toast("Invitation sent.", "success"), onClose());
+              else (toast("Invitation emailed.", "success"), onClose());
             } catch (err) {
               toast(errorMessage(err), "error");
             }
@@ -225,14 +227,29 @@ function InviteModal({ onClose, storeId }: { onClose: () => void; storeId?: numb
             <option value="platform_admin">Platform admin</option>
           </SelectField>
           {f.role === "store_owner" && (
-            <SelectField label="Store" required value={f.storeId} onChange={(e) => setF({ ...f, storeId: e.target.value })}>
-              <option value="">Choose a store…</option>
-              {stores.data?.stores.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </SelectField>
+            <fieldset className="stack" style={{ "--gap": "6px", border: 0, padding: 0, margin: 0 } as React.CSSProperties}>
+              <legend className="small" style={{ fontWeight: 600, marginBottom: 6 }}>
+                Stores they will own <span className="tiny muted">(one or more)</span>
+              </legend>
+              {!stores.data ? (
+                <Loading />
+              ) : !stores.data.stores.length ? (
+                <p className="tiny muted">No stores yet. Create one first.</p>
+              ) : (
+                <div className="stack" style={{ "--gap": "6px", maxHeight: 200, overflowY: "auto" } as React.CSSProperties}>
+                  {stores.data.stores.map((s) => (
+                    <label key={s.id} className="check">
+                      <input
+                        type="checkbox"
+                        checked={f.storeIds.includes(s.id)}
+                        onChange={(e) => setF({ ...f, storeIds: e.target.checked ? [...f.storeIds, s.id] : f.storeIds.filter((x) => x !== s.id) })}
+                      />
+                      <span>{s.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </fieldset>
           )}
           {f.role === "platform_admin" && <div className="alert alert-warning">Administrators can see and change everything on the platform. Invite only people you trust.</div>}
           <Button type="submit">Send invitation</Button>
@@ -435,7 +452,7 @@ function Catalog() {
   const { run } = useAction();
   return (
     <div className="stack" style={{ "--gap": "24px" } as React.CSSProperties}>
-      <PageHead title="Catalog" eyebrow="Moderation & homepage merchandising" />
+      <PageHead title="Catalog" eyebrow="Moderation & homepage merchandising" actions={<Link className="btn" to="/admin/catalog/new">+ New product</Link>} />
       <input className="input" style={{ maxWidth: 300 }} placeholder="Search products or stores" aria-label="Search products" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="table-wrap">
         <table className="data">
@@ -452,8 +469,9 @@ function Catalog() {
             {data?.products.map((p) => (
               <tr key={p.id}>
                 <td>
-                  <Link to={`/product/${p.slug}`} target="_blank">
-                    {p.name}
+                  <Link to={`/admin/catalog/${p.store_id}/${p.id}`}>{p.name}</Link>{" "}
+                  <Link to={`/product/${p.slug}`} target="_blank" className="tiny muted">
+                    View ↗
                   </Link>
                 </td>
                 <td>{p.store}</td>
@@ -538,6 +556,7 @@ function Orders() {
                   </td>
                   <td>
                     <StatusBadge status={o.status} label={o.statusLabel} />
+                    <TrackLine t={o.tracking} />
                   </td>
                   <td className="r num">{inr(o.totalPaise)}</td>
                 </tr>
@@ -741,6 +760,7 @@ function Delivery() {
                     <div className="tiny muted">{p.email}</div>
                   </td>
                   <td>
+                    {(p.city || p.state) && <div className="small" style={{ fontWeight: 600 }}>{[p.city, p.state].filter(Boolean).join(", ")}</div>}
                     <button className="link small" onClick={() => { const v = prompt("PIN code prefixes served (comma-separated):", p.service_pincodes); if (v != null) run(() => api.patch(`/admin/delivery-partners/${p.id}`, { servicePincodes: v }), "Service area updated.", partners.reload); }}>
                       {p.service_pincodes || "Set area"}
                     </button>
@@ -811,16 +831,16 @@ function Delivery() {
 }
 
 function Reviews() {
-  const [status, setStatus] = useState("pending");
+  const [status, setStatus] = useState("published");
   const { data, reload } = useApi<{ reviews: any[] }>(`/admin/reviews?status=${status}`);
   const { run } = useAction();
   return (
     <div className="stack">
-      <PageHead title="Review moderation" />
+      <PageHead title="Customer reviews" />
       <div className="row">
-        {["pending", "published", "rejected"].map((s) => (
+        {[["published", "Live"], ["rejected", "Removed"]].map(([s, label]) => (
           <button key={s} className="chip" aria-pressed={status === s} onClick={() => setStatus(s)}>
-            {titleCase(s)}
+            {label}
           </button>
         ))}
       </div>
@@ -834,16 +854,17 @@ function Reviews() {
             <span className="muted">{relative(r.created_at)}</span>
           </div>
           {r.title && <strong>{r.title}</strong>}
-          <p className="small">{r.body}</p>
+          {r.body && <p className="small">{r.body}</p>}
+          <ReviewPhotos photos={r.photos} />
           <div className="row">
             {r.status !== "published" && (
-              <button className="btn btn-sm" onClick={() => run(() => api.post(`/admin/reviews/${r.id}`, { status: "published" }), "Review published.", reload)}>
-                Publish
+              <button className="btn btn-sm" onClick={() => run(() => api.post(`/admin/reviews/${r.id}`, { status: "published" }), "Review restored.", reload)}>
+                Restore
               </button>
             )}
             {r.status !== "rejected" && (
-              <button className="btn btn-outline btn-sm" onClick={() => run(() => api.post(`/admin/reviews/${r.id}`, { status: "rejected" }), "Review rejected.", reload)}>
-                Reject
+              <button className="btn btn-outline btn-sm" onClick={() => run(() => api.post(`/admin/reviews/${r.id}`, { status: "rejected" }), "Review removed.", reload)}>
+                Remove
               </button>
             )}
           </div>
@@ -877,6 +898,11 @@ function Support() {
             <p className="small" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
               {m.body}
             </p>
+            {m.photo && (
+              <a href={`/api/support/photos/${m.photo}`} target="_blank" rel="noopener">
+                <img src={`/api/support/photos/${m.photo}`} alt="Photo from the customer" className="chat-photo" loading="lazy" />
+              </a>
+            )}
           </div>
         ))}
         <form className="card stack" onSubmit={(e) => (e.preventDefault(), run(() => api.post(`/admin/tickets/${id}/reply`, { body, status }), "Reply sent.", () => (setBody(""), one.reload())))}>
@@ -1013,6 +1039,35 @@ function DevEmails() {
   );
 }
 
+/** Pick which store a new product belongs to, then open the shared product form. */
+function NewProduct() {
+  const { data, error } = useApi<{ stores: { id: number; name: string; status: string }[] }>("/admin/catalog/stores");
+  const [storeId, setStoreId] = useState<number | null>(null);
+  if (error) return <ErrorState error={error} />;
+  if (!data) return <Loading />;
+  if (!data.stores.length) return <Empty title="No stores yet" action={<Link className="btn" to="/admin/stores">Create a store</Link>}>Products belong to a store. Create one first.</Empty>;
+  const chosen = storeId ?? (data.stores.length === 1 ? data.stores[0].id : null);
+  return (
+    <div className="stack" style={{ "--gap": "20px" } as React.CSSProperties}>
+      <SelectField label="Store" required value={chosen ?? ""} onChange={(e) => setStoreId(e.target.value ? Number(e.target.value) : null)} hint="The store that sells and ships this product.">
+        <option value="">Choose a store…</option>
+        {data.stores.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+            {s.status !== "active" ? ` (${s.status})` : ""}
+          </option>
+        ))}
+      </SelectField>
+      {chosen && <ProductEditor key={chosen} storeId={chosen} productId="new" base={`/admin/catalog/${chosen}`} back="/admin/catalog" />}
+    </div>
+  );
+}
+
+function AdminProduct() {
+  const { storeId } = useParams();
+  return <ProductEditor storeId={Number(storeId)} base={`/admin/catalog/${storeId}`} back="/admin/catalog" />;
+}
+
 export default function Admin() {
   const { user } = useAuth();
   const has = (p: string) => user?.permissions.includes(p);
@@ -1042,6 +1097,8 @@ export default function Admin() {
         <Route path="users/:id" element={<UserView />} />
         <Route path="stores" element={<Stores />} />
         <Route path="catalog" element={<Catalog />} />
+        <Route path="catalog/new" element={<NewProduct />} />
+        <Route path="catalog/:storeId/:id" element={<AdminProduct />} />
         <Route path="orders" element={<Orders />} />
         <Route path="orders/:number" element={<OrderView />} />
         <Route path="delivery" element={<Delivery />} />

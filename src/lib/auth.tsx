@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError, api, newRequestId } from "./api";
+import { playFeedback } from "./feedback";
 import { useToast } from "./toast";
 
 export type Role = "customer" | "store_owner" | "platform_admin" | "delivery_partner";
@@ -14,6 +15,8 @@ export interface Me {
   permissions: string[];
   stores: { id: number; name: string; slug: string; status: string; role: string }[];
   deliveryPartner: { status: string; availability: string } | null;
+  /** A new account that hasn't saved or skipped the "tell us about you" step. */
+  needsProfile?: boolean;
 }
 
 interface MeResponse {
@@ -21,7 +24,7 @@ interface MeResponse {
   cartCount: number;
   unreadNotifications: number;
   preferences: Record<string, any> | null;
-  integrations?: { google: boolean };
+  integrations?: { google: boolean; microsoft?: boolean };
 }
 
 interface PendingAdd {
@@ -39,6 +42,7 @@ interface AuthState {
   unread: number;
   preferences: Record<string, any> | null;
   googleEnabled: boolean;
+  microsoftEnabled: boolean;
   refresh: () => Promise<void>;
   setCartCount: (n: number) => void;
   signIn: (email: string, password: string) => Promise<Me>;
@@ -75,6 +79,20 @@ export function homeFor(user: Me | null) {
   if (user.stores.length) return "/owner";
   if (user.roles.includes("delivery_partner")) return "/delivery";
   return "/account";
+}
+
+/**
+ * Where to land right after signing in. A real destination the visitor was heading to (a product,
+ * the bag, an invite…) wins; otherwise each role opens on its first page: admins on the dashboard,
+ * store owners on their store, partners on deliveries, and customers in the shop. Everyone can
+ * still reach My account from the menu.
+ */
+export function landingAfterSignIn(user: Me, returnTo = "") {
+  const path = returnTo.split(/[?#]/)[0];
+  const generic = !path || path === "/" || path === "/signin" || path === "/account";
+  if (!generic) return returnTo;
+  const home = homeFor(user);
+  return home === "/account" ? "/shop" : home;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -173,6 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       try {
         await doAdd({ variantId, quantity, requestId, productName: opts.productName });
+        playFeedback();
         return true;
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) {
@@ -198,6 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         unread: state.unreadNotifications,
         preferences: state.preferences,
         googleEnabled: Boolean(state.integrations?.google),
+        microsoftEnabled: Boolean(state.integrations?.microsoft),
         refresh,
         setCartCount: (n) => setState((s) => ({ ...s, cartCount: n })),
         signIn,

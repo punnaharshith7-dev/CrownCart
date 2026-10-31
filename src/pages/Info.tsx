@@ -6,6 +6,7 @@ import { ApiError, api, errorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { inr } from "../lib/format";
 import { useApi, useTitle } from "../lib/useApi";
+import { BounceHeading } from "../components/BounceHeading";
 
 interface Policies {
   shipping: { flatPaise: number; freeThresholdPaise: number; estimateDaysMin: number; estimateDaysMax: number };
@@ -18,7 +19,16 @@ interface Policies {
 function Contact() {
   const { user } = useAuth();
   const [params] = useSearchParams();
-  const [f, setF] = useState({ name: user?.name ?? "", email: user?.email ?? "", subject: params.get("subject") ?? "", category: "general", message: "", orderNumber: params.get("order") ?? "", website: "" });
+  const topics = ["general", "order", "delivery", "payment", "returns", "product", "account"];
+  const [f, setF] = useState({
+    name: user?.name ?? "",
+    email: user?.email ?? "",
+    subject: params.get("subject") ?? "",
+    category: topics.includes(params.get("category") ?? "") ? params.get("category")! : params.get("order") ? "order" : "general",
+    message: "",
+    orderNumber: params.get("order") ?? "",
+    website: "",
+  });
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState<number | null>(null);
@@ -30,8 +40,8 @@ function Contact() {
   return (
     <div className="container container-narrow page stack" style={{ "--gap": "24px" } as React.CSSProperties}>
       <div>
-        <div className="eyebrow">05 · Contact</div>
-        <h1 className="display">We're here to help</h1>
+        <div className="eyebrow">Contact</div>
+        <BounceHeading className="display">We're here to help</BounceHeading>
         <p className="muted" style={{ marginTop: 8 }}>
           Questions about an order, a product or your account? Send us a message and we'll reply by email.
           {pol.data?.brand.supportEmail && (
@@ -56,7 +66,7 @@ function Contact() {
             setError(null);
             setFields({});
             try {
-              const r = await api.post<{ ticketId: number }>("/support/tickets", { ...f, orderNumber: f.orderNumber || null });
+              const r = await api.post<{ ticketId: number }>("/support/tickets", { ...f, orderNumber: (user && f.orderNumber) || null }); // signed out: the order is already named in the subject
               setSent(r.ticketId);
             } catch (err) {
               setError(errorMessage(err));
@@ -106,7 +116,7 @@ function Policy() {
   return (
     <article className="container container-narrow page stack" style={{ "--gap": "16px", lineHeight: 1.7 } as React.CSSProperties}>
       <div className="eyebrow">Policies</div>
-      <h1 className="display">{titles[policy]}</h1>
+      <BounceHeading className="display">{titles[policy]}</BounceHeading>
       <div className="alert alert-warning">
         Draft for review. This page describes how the store is configured today and must be reviewed by a qualified professional before launch. It is not legal advice and makes no claims of regulatory compliance.
       </div>
@@ -157,7 +167,14 @@ function Policy() {
         </>
       )}
       <p className="small muted">
-        Questions? <Link to="/contact">Contact us</Link>.
+        Questions? <Link to="/contact">Contact us</Link>
+        {data?.brand.supportEmail && (
+          <>
+            {" "}
+            or write to <a href={`mailto:${data.brand.supportEmail}`}>{data.brand.supportEmail}</a>
+          </>
+        )}
+        .
       </p>
     </article>
   );

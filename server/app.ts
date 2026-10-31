@@ -14,10 +14,12 @@ import { checkoutRoutes, paymentRoutes } from "./routes/checkout.ts";
 import { orderRoutes } from "./routes/orders.ts";
 import { ownerRoutes } from "./routes/owner.ts";
 import { adminRoutes } from "./routes/admin.ts";
-import { deliveryRoutes } from "./routes/delivery.ts";
+import { deliveryPhotoRoutes, deliveryRoutes } from "./routes/delivery.ts";
 import { supportRoutes } from "./routes/support.ts";
 import { seoRoutes } from "./routes/seo.ts";
 import { googleRoutes } from "./routes/google.ts";
+import { microsoftRoutes } from "./routes/microsoft.ts";
+import { passwordlessRoutes } from "./routes/passwordless.ts";
 import { shippingRoutes } from "./routes/shipping.ts";
 import { assistantRoutes } from "./routes/assistant.ts";
 
@@ -53,7 +55,7 @@ export function createApp(db: Db) {
         scriptSrc: ["'self'", "https://checkout.razorpay.com"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://rsms.me"],
         fontSrc: ["'self'", "https://fonts.gstatic.com", "https://rsms.me"],
-        imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com"],
+        imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com", "https:"],
         connectSrc: ["'self'", "https://api.razorpay.com", "https://lumberjack.razorpay.com"],
         frameSrc: ["https://api.razorpay.com", "https://checkout.razorpay.com"],
         objectSrc: ["'none'"],
@@ -100,6 +102,8 @@ export function createApp(db: Db) {
   });
 
   app.route("/api/auth/google", googleRoutes);
+  app.route("/api/auth/microsoft", microsoftRoutes);
+  app.route("/api/auth", passwordlessRoutes);
   app.route("/api/auth", authRoutes);
   app.route("/api/catalog", catalogRoutes);
   app.route("/api/cart", cartRoutes);
@@ -110,6 +114,7 @@ export function createApp(db: Db) {
   app.route("/api/orders", orderRoutes);
   app.route("/api/owner", ownerRoutes);
   app.route("/api/admin", adminRoutes);
+  app.route("/api/delivery/photos", deliveryPhotoRoutes);
   app.route("/api/delivery", deliveryRoutes);
   app.route("/api/support", supportRoutes);
   app.route("/api/shipping", shippingRoutes);

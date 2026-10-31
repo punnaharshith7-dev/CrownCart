@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StoreLayout } from "../../components/SiteHeader";
 import { CardSkeletons, ProductCard, type Card } from "../../components/ProductCard";
 import { Empty, ErrorState } from "../../components/ui";
 import { useApi, useTitle } from "../../lib/useApi";
+import { BounceHeading } from "../../components/BounceHeading";
 
 interface Facets {
   categories: { name: string; slug: string; parentId: number | null; description: string; count: number }[];
   brands: { name: string; slug: string; count: number }[];
+  genders: { men: number; women: number; unisex: number };
   priceRange: { min: number; max: number };
 }
 interface Results {
@@ -17,6 +19,12 @@ interface Results {
   pageSize: number;
   suggestion: string | null;
 }
+
+const GENDERS = [
+  ["men", "Men"],
+  ["women", "Women"],
+  ["unisex", "Unisex"],
+] as const;
 
 const SORTS = [
   ["relevance", "Relevance"],
@@ -63,11 +71,34 @@ export default function Shop() {
 
   const chips: [string, string, () => void][] = [];
   if (q) chips.push(["q", `“${q}”`, () => update({ q: null })]);
+  const gender = GENDERS.find(([g]) => g === params.get("gender"));
+  if (gender) chips.push(["gender", gender[1], () => update({ gender: null })]);
   brands.forEach((b) => chips.push([`b-${b}`, facets.data?.brands.find((x) => x.slug === b)?.name ?? b, () => toggleBrand(b)]));
   if (params.get("minPrice") || params.get("maxPrice")) chips.push(["price", `₹${params.get("minPrice") || 0} – ₹${params.get("maxPrice") || "any"}`, () => update({ minPrice: null, maxPrice: null })]);
   if (params.get("inStock")) chips.push(["stock", "In stock", () => update({ inStock: null })]);
   if (params.get("onSale")) chips.push(["sale", "On sale", () => update({ onSale: null })]);
   if (params.get("minRating")) chips.push(["rating", `${params.get("minRating")}★ & up`, () => update({ minRating: null })]);
+
+  // Keep the filter column at the same scroll position across category changes (each is a new route).
+  const filtersRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const el = filtersRef.current;
+    if (!el || !facets.data) return;
+    try {
+      el.scrollTop = Number(sessionStorage.getItem("cc-filters-scroll") ?? 0);
+    } catch {
+      /* storage unavailable */
+    }
+    const save = () => {
+      try {
+        sessionStorage.setItem("cc-filters-scroll", String(el.scrollTop));
+      } catch {
+        /* storage unavailable */
+      }
+    };
+    el.addEventListener("scroll", save, { passive: true });
+    return () => el.removeEventListener("scroll", save);
+  }, [facets.data]);
 
   const page = Number(params.get("page") ?? 1);
   const pages = results.data ? Math.ceil(results.data.total / results.data.pageSize) : 1;
@@ -82,7 +113,7 @@ export default function Shop() {
         <div className="page-head">
           <div>
             <div className="eyebrow">{q ? "Search results" : "Collections"}</div>
-            <h1 className="display">{q ? `“${q}”` : cat?.name ?? "Shop all"}</h1>
+            <BounceHeading className="display">{q ? `“${q}”` : cat?.name ?? "Shop all"}</BounceHeading>
             {cat?.description && <p className="muted" style={{ marginTop: 6 }}>{cat.description}</p>}
           </div>
           <div className="row">
@@ -103,7 +134,7 @@ export default function Shop() {
         </div>
 
         <div className="shop-layout">
-          <aside id="filters" className={`filters${filtersOpen ? " open" : ""}`} aria-label="Filters">
+          <aside ref={filtersRef} id="filters" className={`filters${filtersOpen ? " open" : ""}`} aria-label="Filters">
             <fieldset>
               <legend>Category</legend>
               <Link className={`chip${!category ? " active" : ""}`} to={`/shop${params.toString() ? `?${params}` : ""}`}>
@@ -117,17 +148,30 @@ export default function Shop() {
                   </Link>
                 ))}
             </fieldset>
+            <fieldset>
+              <legend>Shop for</legend>
+              {GENDERS.map(([g, label]) => (
+                <label key={g} className="check">
+                  <input type="radio" name="gender" checked={params.get("gender") === g} onChange={() => update({ gender: g })} />
+                  <span>
+                    {label} {facets.data && <span className="muted">({facets.data.genders[g]})</span>}
+                  </span>
+                </label>
+              ))}
+            </fieldset>
             {facets.data && facets.data.brands.length > 0 && (
               <fieldset>
                 <legend>Brand</legend>
-                {facets.data.brands.map((b) => (
-                  <label key={b.slug} className="check">
-                    <input type="checkbox" checked={brands.includes(b.slug)} onChange={() => toggleBrand(b.slug)} />
-                    <span>
-                      {b.name} <span className="muted">({b.count})</span>
-                    </span>
-                  </label>
-                ))}
+                <div style={{ maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, paddingRight: 4 }}>
+                  {[...facets.data.brands].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((b) => (
+                    <label key={b.slug} className="check">
+                      <input type="checkbox" checked={brands.includes(b.slug)} onChange={() => toggleBrand(b.slug)} />
+                      <span>
+                        {b.name} <span className="muted">({b.count})</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
               </fieldset>
             )}
             <fieldset>
@@ -188,6 +232,7 @@ export default function Shop() {
             ) : results.data.items.length === 0 ? (
               <Empty
                 title="No products found"
+                art="search"
                 action={
                   <Link className="btn btn-outline" to="/shop">
                     Browse everything

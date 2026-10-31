@@ -3,6 +3,9 @@ import { StoreLayout } from "../../components/SiteHeader";
 import { ErrorState, Loading, StatusBadge } from "../../components/ui";
 import { inr } from "../../lib/format";
 import { useApi, useTitle } from "../../lib/useApi";
+import { BounceHeading } from "../../components/BounceHeading";
+import { useEffect } from "react";
+import { confettiBurst } from "../../lib/confetti";
 
 interface CheckoutStatus {
   id: number;
@@ -21,10 +24,19 @@ export default function OrderPlaced() {
   if (error || !data) return <StoreLayout><ErrorState error={error} retry={reload} /></StoreLayout>;
   const ok = data.status === "paid" || data.status === "cod";
   return (
+    <>
+    {ok && <Celebrate checkoutId={String(data.id)} />}
     <StoreLayout>
       <div className="container container-narrow page stack" style={{ textAlign: "center", "--gap": "18px" } as React.CSSProperties}>
+        {ok && (
+          <div className="order-stamp" aria-hidden="true">
+            <span>Order</span>
+            <strong>Confirmed</strong>
+            <span>✦ CrownCart ✦</span>
+          </div>
+        )}
         <div className="eyebrow">{ok ? "Thank you" : "Payment status"}</div>
-        <h1 className="display">{ok ? "Order confirmed" : data.status === "pending" ? "Awaiting payment" : "Payment not completed"}</h1>
+        <BounceHeading className="display" center>{ok ? "Order confirmed" : data.status === "pending" ? "Awaiting payment" : "Payment not completed"}</BounceHeading>
         <p className="muted">
           {ok
             ? data.status === "cod"
@@ -67,5 +79,22 @@ export default function OrderPlaced() {
         </div>
       </div>
     </StoreLayout>
+    </>
   );
+}
+
+/** Confetti once per confirmed checkout (a refresh doesn't replay it). */
+function Celebrate({ checkoutId }: { checkoutId: string }) {
+  useEffect(() => {
+    const key = `cc-celebrated-${checkoutId}`;
+    try {
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, "1");
+    } catch {
+      /* storage unavailable: celebrate anyway */
+    }
+    const t = setTimeout(confettiBurst, 450);
+    return () => clearTimeout(t);
+  }, [checkoutId]);
+  return null;
 }

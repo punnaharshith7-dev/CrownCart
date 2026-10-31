@@ -3,7 +3,7 @@ import { config, integrations } from "../config.ts";
 import { hmacSha256, safeEqualHex } from "./crypto.ts";
 import { conflict, unavailable } from "./errors.ts";
 import { commitReservedStock, releaseReservedStock, transitionOrder } from "./orders.ts";
-import { notify, notifyMany, sendEmail } from "./notify.ts";
+import { adminInbox, notify, notifyMany, sendEmail } from "./notify.ts";
 import { audit } from "./audit.ts";
 import { messageCustomer } from "./messaging.ts";
 
@@ -101,11 +101,31 @@ export function confirmCheckout(db: Db, checkoutId: number, how: { paymentId?: n
     body: how.cod ? "Pay when your order arrives." : "Payment received. We'll let you know when it ships.",
     link: `/account/orders/${orders[0].number}`,
   });
+  // Every product ordered gets its own support link; replying to the email reaches the admin inbox.
+  const helpLines = orders.flatMap((o) =>
+    db.all("SELECT product_name, variant_name, quantity FROM order_items WHERE order_id = ?", [o.id]).map((i) => {
+      const subject = encodeURIComponent(`Help with ${i.product_name} (order ${o.number})`);
+      return `- ${i.quantity} × ${i.product_name} (${i.variant_name})\n  Need help with this item? ${config.publicUrl}/contact?order=${o.number}&category=order&subject=${subject}`;
+    }),
+  );
   sendEmail(
     db,
     user.email,
     `Your CrownCart order ${numbers}`,
-    `Hi ${user.name},\n\nThank you for your order (${numbers}).\nTotal: ₹${(checkout.total_paise / 100).toLocaleString("en-IN")}\nPayment: ${how.cod ? "Cash on delivery" : "Paid online"}\n\nTrack it any time at ${config.publicUrl}/account/orders/${orders[0].number}`,
+    [
+      `Hi ${user.name},`,
+      "",
+      `Thank you for your order (${numbers}).`,
+      `Total: ₹${(checkout.total_paise / 100).toLocaleString("en-IN")}`,
+      `Payment: ${how.cod ? "Cash on delivery" : "Paid online"}`,
+      "",
+      "Your items:",
+      ...helpLines,
+      "",
+      `Track it any time at ${config.publicUrl}/account/orders/${orders[0].number}`,
+      "Questions about any item? Use its help link above, or simply reply to this email.",
+    ].join("\n"),
+    { replyTo: adminInbox(db)[0] },
   );
   db.run("INSERT INTO analytics_events (name, user_id, props) VALUES ('purchase', ?, ?)", [
     checkout.user_id,

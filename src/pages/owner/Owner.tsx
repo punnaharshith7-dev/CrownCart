@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { DateRange, PageHead, PortalLayout, Stat, defaultRange } from "../../components/Portal";
-import { Bars, Button, Empty, ErrorState, Loading, Modal, SelectField, StatusBadge, TextArea, TextField } from "../../components/ui";
+import { Bars, Button, Empty, ErrorState, Loading, Modal, Price, SelectField, StatusBadge, TextArea, TextField } from "../../components/ui";
 import { api, errorMessage } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { date, dateTime, inr, relative } from "../../lib/format";
 import { useToast } from "../../lib/toast";
 import { useApi } from "../../lib/useApi";
-import { OrderLines, OrderTimeline, ShipmentTracking, type OrderDetail } from "../account/Account";
+import { OrderLines, OrderTimeline, ShipmentTracking, TrackLine, type OrderDetail } from "../account/Account";
 import { formatAddress } from "../../components/AddressForm";
 import { BulkUpdate, MediaEditor, OwnerReports, ProductHistory, VariantsEditor } from "./OwnerExtras";
 
@@ -189,6 +189,7 @@ function OrdersList({ storeId }: { storeId: number }) {
                   </td>
                   <td>
                     <StatusBadge status={o.status} label={o.statusLabel} />
+                    <TrackLine t={o.tracking} />
                   </td>
                   <td className="r num">{inr(o.totalPaise)}</td>
                 </tr>
@@ -306,12 +307,18 @@ function OrderView({ storeId }: { storeId: number }) {
                     {r.status === "requested" && (
                       <>
                         <button className="btn btn-sm" onClick={() => run(() => api.post(`/owner/stores/${storeId}/returns/${r.id}`, { action: "approve" }), "Return approved.")}>
-                          Approve
+                          Approve & arrange pickup
                         </button>
                         <button className="btn btn-outline btn-sm" onClick={() => run(() => api.post(`/owner/stores/${storeId}/returns/${r.id}`, { action: "reject", note: prompt("Reason for declining?") ?? "" }), "Return declined.")}>
                           Decline
                         </button>
                       </>
+                    )}
+                    {/* After a failed pickup (or none active), the store can send a partner again. */}
+                    {r.status === "approved" && !o.shipments.some((s) => s.kind === "return" && !["failed", "cancelled", "delivered"].includes(s.status)) && (
+                      <button className="btn btn-outline btn-sm" onClick={() => run(() => api.post(`/owner/stores/${storeId}/returns/${r.id}`, { action: "pickup" }), "Pickup arranged.")}>
+                        Arrange pickup
+                      </button>
                     )}
                     {(r.status === "approved" || r.status === "picked_up") && (
                       <button className="btn btn-sm" onClick={() => run(() => api.post(`/owner/stores/${storeId}/returns/${r.id}`, { action: "receive", restock: true }), "Items received and restocked.")}>
@@ -363,7 +370,7 @@ function OrderView({ storeId }: { storeId: number }) {
   );
 }
 
-const emptyProduct = { name: "", brand: "", categoryId: null as number | null, tagline: "", badge: "", description: "", care: "", warranty: "", returnDays: 7, status: "draft", isFeatured: false, titleLine1: "", titleLine2: "", accent: "", seoTitle: "", seoDescription: "", specs: [] as { label: string; value: string }[] };
+const emptyProduct = { name: "", brand: "", categoryId: null as number | null, gender: null as string | null, tagline: "", badge: "", description: "", care: "", warranty: "", returnDays: 7, status: "draft", isFeatured: false, titleLine1: "", titleLine2: "", accent: "", seoTitle: "", seoDescription: "", specs: [] as { label: string; value: string }[] };
 
 function Products({ storeId }: { storeId: number }) {
   const [q, setQ] = useState("");
@@ -423,15 +430,31 @@ function Products({ storeId }: { storeId: number }) {
   );
 }
 
-function ProductEditor({ storeId }: { storeId: number }) {
-  const { id } = useParams();
+/** The size as it appears in a SKU: "UK 7" becomes "UK7". */
+const sizeCode = (size: string) => size.trim().toUpperCase().replace(/[^A-Z0-9._-]/g, "") || encodeURIComponent(size.trim()).replace(/[^A-Za-z0-9]/g, "").slice(0, 20);
+
+/** Product create/edit form. Shared by the store portal and the admin catalog; `base` is the list URL. */
+export function ProductEditor({ storeId, base = "/owner/products", back = base, productId }: { storeId: number; base?: string; back?: string; productId?: string }) {
+  const params = useParams();
+  const id = productId ?? params.id;
   const isNew = id === "new";
   const navigate = useNavigate();
   const toast = useToast();
   const cats = useApi<{ categories: { id: number; name: string }[] }>("/owner/categories");
   const existing = useApi<{ product: any }>(isNew ? null : `/owner/stores/${storeId}/products/${id}`);
   const [f, setF] = useState(emptyProduct);
-  const [variant, setVariant] = useState({ sku: "", name: "Standard", size: "", price: "", stock: "0" });
+  const [variant, setVariant] = useState({ sku: "", price: "", original: "" });
+  const nextSize = useRef(1);
+  const focusSize = useRef(0);
+  const [sizes, setSizes] = useState([{ key: 0, size: "", stock: "" }]);
+  const addSize = () => {
+    focusSize.current = nextSize.current++;
+    setSizes((list) => [...list, { key: focusSize.current, size: "", stock: "" }]);
+  };
+  const [images, setImages] = useState<{ file: File; url: string }[]>([]);
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  useEffect(() => () => imagesRef.current.forEach((i) => URL.revokeObjectURL(i.url)), []);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -443,21 +466,39 @@ function ProductEditor({ storeId }: { storeId: number }) {
   if (!isNew && !existing.data) return existing.error ? <ErrorState error={existing.error} /> : <Loading />;
   const p = existing.data?.product;
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setF({ ...f, [k]: e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : k === "returnDays" ? Number(e.target.value) : k === "categoryId" ? (e.target.value ? Number(e.target.value) : null) : e.target.value });
+    setF({ ...f, [k]: e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : k === "returnDays" ? Number(e.target.value) : k === "categoryId" ? (e.target.value ? Number(e.target.value) : null) : k === "gender" ? e.target.value || null : e.target.value });
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    const filled = sizes.filter((s) => s.size.trim());
+    const codes = filled.map((s) => sizeCode(s.size));
+    if (new Set(codes).size < codes.length) return setErr("Each size can only be added once.");
+    if (isNew && variant.original && Number(variant.original) <= Number(variant.price)) return setErr("The original price must be higher than the current price.");
     setBusy(true);
     setErr(null);
     const payload = { ...f, brand: f.brand || null, seoTitle: f.seoTitle || null, seoDescription: f.seoDescription || null, specs: f.specs.filter((s) => s.label && s.value) };
     try {
       if (isNew) {
+        const sku = variant.sku.trim();
+        const pricePaise = Math.round(Number(variant.price) * 100);
+        const compareAtPaise = variant.original ? Math.round(Number(variant.original) * 100) : null;
         const r = await api.post<{ product: { id: number } }>(`/owner/stores/${storeId}/products`, {
           ...payload,
-          variants: [{ sku: variant.sku, name: variant.name || "Standard", size: variant.size || null, pricePaise: Math.round(Number(variant.price) * 100), stock: Number(variant.stock) }],
+          variants: filled.length
+            ? filled.map((s, i) => ({ sku: `${sku}-${codes[i]}`, name: s.size.trim(), size: s.size.trim(), pricePaise, compareAtPaise, stock: Number(s.stock) }))
+            : [{ sku, name: "Standard", size: null, pricePaise, compareAtPaise, stock: Number(sizes[0].stock) }],
         });
-        toast("Product created.", "success");
-        navigate(`/owner/products/${r.product.id}`, { replace: true });
+        // Upload chosen images one by one; the product exists even if an image fails.
+        let failed = 0;
+        for (const img of images) {
+          const form = new FormData();
+          form.append("file", img.file);
+          form.append("kind", "image");
+          form.append("alt", f.name);
+          await api.upload(`/owner/stores/${storeId}/products/${r.product.id}/media`, form).catch(() => failed++);
+        }
+        toast(failed ? `Product created, but ${failed} image${failed > 1 ? "s" : ""} failed to upload. Add them again below.` : "Product created.", failed ? "error" : "success");
+        navigate(`${base}/${r.product.id}`, { replace: true });
       } else {
         await api.put(`/owner/stores/${storeId}/products/${id}`, payload);
         toast("Product saved.", "success");
@@ -472,7 +513,7 @@ function ProductEditor({ storeId }: { storeId: number }) {
 
   return (
     <div className="stack" style={{ "--gap": "20px" } as React.CSSProperties}>
-      <Link to="/owner/products" className="small">
+      <Link to={back} className="small">
         ← Products
       </Link>
       <PageHead
@@ -494,7 +535,7 @@ function ProductEditor({ storeId }: { storeId: number }) {
                   try {
                     const r = await api.post<{ product: { id: number } }>(`/owner/stores/${storeId}/products/${p.id}/duplicate`);
                     toast("Duplicated as a draft with zero stock.", "success");
-                    navigate(`/owner/products/${r.product.id}`);
+                    navigate(`${base}/${r.product.id}`);
                   } catch (e) {
                     toast(errorMessage(e), "error");
                   }
@@ -519,6 +560,12 @@ function ProductEditor({ storeId }: { storeId: number }) {
                     {c.name}
                   </option>
                 ))}
+              </SelectField>
+              <SelectField label="Made for" value={f.gender ?? ""} onChange={set("gender")} hint="Sets where it appears in the shop's Men, Women and Unisex filter.">
+                <option value="">Doesn't apply</option>
+                <option value="men">Men</option>
+                <option value="women">Women</option>
+                <option value="unisex">Both (unisex)</option>
               </SelectField>
             </div>
             <TextField label="Tagline" value={f.tagline} onChange={set("tagline")} />
@@ -545,15 +592,95 @@ function ProductEditor({ storeId }: { storeId: number }) {
           </section>
           {isNew ? (
             <section className="card stack">
-              <h2 className="h3">First variant</h2>
+              <h2 className="h3">Price & SKU</h2>
               <div className="grid" style={{ "--min": "150px" } as React.CSSProperties}>
-                <TextField label="SKU" required value={variant.sku} onChange={(e) => setVariant({ ...variant, sku: e.target.value })} />
-                <TextField label="Variant name" value={variant.name} onChange={(e) => setVariant({ ...variant, name: e.target.value })} />
-                <TextField label="Size" value={variant.size} onChange={(e) => setVariant({ ...variant, size: e.target.value })} />
-                <TextField label="Price (₹)" required inputMode="decimal" value={variant.price} onChange={(e) => setVariant({ ...variant, price: e.target.value })} />
-                <TextField label="Stock" inputMode="numeric" value={variant.stock} onChange={(e) => setVariant({ ...variant, stock: e.target.value })} />
+                <TextField label="SKU" required maxLength={19} value={variant.sku} onChange={(e) => setVariant({ ...variant, sku: e.target.value })} hint="Each size gets its own code from this, like JORDAN1-UK7." />
+                <TextField label="Current price (₹)" required inputMode="decimal" value={variant.price} onChange={(e) => setVariant({ ...variant, price: e.target.value })} hint="What customers pay." />
+                <TextField label="Original price (₹)" inputMode="decimal" value={variant.original} onChange={(e) => setVariant({ ...variant, original: e.target.value })} hint="Optional. Add it to show a discount." />
               </div>
-              <p className="tiny muted">More variants, images and media can be added after saving.</p>
+              {Number(variant.price) > 0 && Number(variant.original) > Number(variant.price) && (
+                <div className="small">
+                  <span className="muted">Customers will see: </span>
+                  <Price paise={Math.round(Number(variant.price) * 100)} compareAt={Math.round(Number(variant.original) * 100)} />
+                </div>
+              )}
+              <div className="spread" style={{ marginTop: 8 }}>
+                <h2 className="h3">Add sizes to this product</h2>
+                <button type="button" className="btn btn-outline btn-sm" onClick={addSize}>
+                  + Add size
+                </button>
+              </div>
+              {sizes.map((s, i) => (
+                <div key={s.key} className="row">
+                  <input
+                    className="input"
+                    style={{ flex: 2, minWidth: 120 }}
+                    aria-label={`Size ${i + 1}`}
+                    placeholder="Size, like UK 7 or M"
+                    maxLength={20}
+                    autoFocus={s.key === focusSize.current}
+                    value={s.size}
+                    onChange={(e) => setSizes(sizes.map((x) => (x.key === s.key ? { ...x, size: e.target.value } : x)))}
+                    onKeyDown={(e) => {
+                      // Enter moves on to the next size rather than submitting the form.
+                      if (e.key === "Enter") (e.preventDefault(), addSize());
+                    }}
+                  />
+                  <input
+                    className="input"
+                    style={{ flex: 1, minWidth: 80 }}
+                    aria-label={`Stock for size ${i + 1}`}
+                    placeholder="Stock"
+                    inputMode="numeric"
+                    value={s.stock}
+                    onChange={(e) => setSizes(sizes.map((x) => (x.key === s.key ? { ...x, stock: e.target.value.replace(/\D/g, "") } : x)))}
+                  />
+                  <button type="button" className="icon-btn" aria-label={`Remove size ${i + 1}`} disabled={sizes.length === 1} onClick={() => setSizes(sizes.filter((x) => x.key !== s.key))}>
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <p className="tiny muted">Customers choose from these sizes. All sizes start at this price, and you can change any of them after saving. No sizes? Leave the size blank and just enter the stock.</p>
+            </section>
+          ) : null}
+          {isNew ? (
+            <section className="card stack">
+              <div className="spread">
+                <h2 className="h3">Images</h2>
+                <label className="btn btn-outline btn-sm" style={{ cursor: "pointer" }}>
+                  + Add images
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    multiple
+                    hidden
+                    onChange={(e) => {
+                      const files = [...(e.target.files ?? [])].map((file) => ({ file, url: URL.createObjectURL(file) }));
+                      setImages((prev) => [...prev, ...files].slice(0, 12));
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+              {images.length ? (
+                <div className="row" style={{ flexWrap: "wrap", "--gap": "10px" } as React.CSSProperties}>
+                  {images.map((img, i) => (
+                    <div key={img.url} style={{ position: "relative" }}>
+                      <img src={img.url} alt="" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 10, display: "block" }} />
+                      {i === 0 && (
+                        <span className="tiny" style={{ position: "absolute", left: 4, bottom: 4, background: "var(--surface)", borderRadius: 6, padding: "1px 6px" }}>
+                          Main
+                        </span>
+                      )}
+                      <button type="button" className="icon-btn" aria-label="Remove image" style={{ position: "absolute", top: 2, right: 2 }} onClick={() => setImages(images.filter((_, j) => j !== i))}>
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="tiny muted">PNG, JPG or WebP. The first image is the main product photo. Up to 12.</p>
+              )}
             </section>
           ) : (
             <>
@@ -731,7 +858,8 @@ function Coupons({ storeId }: { storeId: number }) {
               minOrderPaise: Math.round(Number(f.minOrder || 0) * 100),
               maxDiscountPaise: f.maxDiscount ? Math.round(Number(f.maxDiscount) * 100) : null,
               usageLimit: f.usageLimit ? Number(f.usageLimit) : null,
-              endsAt: f.endsAt ? new Date(f.endsAt).toISOString() : null,
+              // Valid through the end of the chosen day, not just until it starts.
+              endsAt: f.endsAt ? new Date(`${f.endsAt}T23:59:59`).toISOString() : null,
               description: f.description,
               firstOrderOnly: f.firstOrderOnly,
             });

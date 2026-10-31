@@ -7,22 +7,13 @@ browser walkthroughs or app runs were done. The only checks were TypeScript type
 ## Run it locally
 
 ```bash
-cp .env.example .env          # then set SEED_PASSWORD to something 10+ characters
+cp .env.example .env          # then set INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD
 npm install
-npm run seed:dev              # demo accounts + the 4 original products
+npm run create-admin          # your administrator account
 npm run dev                   # API on :8787, storefront on http://localhost:5173
 ```
 
-Demo accounts (password = `SEED_PASSWORD`, development only — `seed:dev` refuses to run in production):
-
-| Role | Email | Lands on |
-| --- | --- | --- |
-| Customer | customer@crowncart.local | `/account` |
-| Store owner | owner@crowncart.local | `/owner` |
-| Delivery partner | rider@crowncart.local | `/delivery` |
-| Platform admin | admin@crowncart.local | `/admin` |
-
-Coupon `WELCOME10` gives 10% off a first order (max ₹1,000).
+There are no demo accounts; every account is a real sign-up or created by an administrator.
 With no email provider set, emails are printed in the API console and listed at `/admin/emails`.
 
 ## Architecture
@@ -47,6 +38,8 @@ With no email provider set, emails are printed in the API console and listed at 
 | Original immersive homepage (baubles scene, typography, numbering, menu) | Kept; wired to real data |
 | Homepage "Acquire Now" → real add-to-bag (or size picker), live prices and ratings | Built |
 | Invented reviews, ratings and counts removed; gallery shows real reviews only | Built |
+| Store styling pass (src/styles/luxe.css): one metallic accent, product stages with cutouts where usable, card hover with second photo and quick add, editorial product page, glass panels, designed empty states, shimmer loading, optional add-to-bag sound and vibration | Built |
+| Customers rate products they received, from the order page or product page, with optional text and up to 5 photos; reviews go live straight away and admins can remove them | Built |
 | Why CrownCart, Our Story, real category counts | Built |
 | Add to Bag while signed out → Sign In → item added automatically (idempotent) | Built |
 | Sign in, register, forgot/reset password, email verification, invitations | Built |

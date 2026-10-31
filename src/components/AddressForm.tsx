@@ -1,3 +1,4 @@
+import { pincodeStateError } from "../lib/pincodes";
 import { useState, type FormEvent } from "react";
 import { ApiError, api, errorMessage } from "../lib/api";
 import { Button, SelectField, TextField } from "./ui";
@@ -78,7 +79,7 @@ export function AddressForm({ initial, onSaved, onCancel }: { initial?: Address;
             <option key={s}>{s}</option>
           ))}
         </SelectField>
-        <TextField label="PIN code" autoComplete="postal-code" inputMode="numeric" maxLength={6} required value={f.pincode} onChange={set("pincode")} error={fields.pincode} />
+        <TextField label="PIN code" autoComplete="postal-code" inputMode="numeric" maxLength={6} required value={f.pincode} onChange={set("pincode")} error={fields.pincode ?? (f.pincode.length === 6 ? pincodeStateError(f.pincode, f.state) ?? undefined : undefined)} />
       </div>
       <div className="row">
         <SelectField label="Label" value={f.label} onChange={set("label")}>

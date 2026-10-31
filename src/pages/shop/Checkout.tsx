@@ -8,7 +8,8 @@ import { useAuth } from "../../lib/auth";
 import { inr } from "../../lib/format";
 import { useToast } from "../../lib/toast";
 import { useTitle } from "../../lib/useApi";
-import { Summary, savedCoupon, type CartSummary } from "./Cart";
+import { Summary, savedCoupon, storeCoupon, type CartSummary } from "./Cart";
+import { BounceHeading } from "../../components/BounceHeading";
 
 interface Options {
   summary: CartSummary;
@@ -88,14 +89,16 @@ export default function Checkout() {
   const [placeError, setPlaceError] = useState<string | null>(null);
   // One key per checkout attempt: a double click or retry can never create two orders.
   const idempotencyKey = useRef(newRequestId());
-  const coupon = savedCoupon();
+  const [coupon, setCoupon] = useState(savedCoupon());
+  const [couponInput, setCouponInput] = useState(coupon);
   useTitle("Checkout", { noindex: true });
 
-  const load = async (credit: { points?: number; gift?: string } = {}) => {
+  const load = async (credit: { points?: number; gift?: string; coupon?: string } = {}) => {
     const pts = credit.points ?? points;
     const gift = credit.gift ?? giftCode;
+    const code = credit.coupon ?? coupon;
     const qs = new URLSearchParams();
-    if (coupon) qs.set("coupon", coupon);
+    if (code) qs.set("coupon", code);
     if (pts) qs.set("points", String(pts));
     if (gift) qs.set("giftCard", gift);
     try {
@@ -104,6 +107,7 @@ export default function Checkout() {
       setAddressId((cur) => cur ?? o.addresses.find((a) => a.isDefault && a.serviceable)?.id ?? o.addresses.find((a) => a.serviceable)?.id ?? null);
       // Keep the chosen method only if it is still offered (e.g. "credit" appears only when nothing is left to pay).
       setMethod((cur) => (cur && o.payments.some((p) => p.method === cur && p.available) ? cur : o.payments.find((p) => p.available)?.method ?? null));
+      return o;
     } catch (e) {
       setError(e);
     }
@@ -117,7 +121,7 @@ export default function Checkout() {
   if (opts.summary.lines.length === 0)
     return (
       <StoreLayout>
-        <Empty title="Your bag is empty" action={<Link className="btn" to="/shop">Shop now</Link>} />
+        <Empty title="Your bag is empty" art="bag" action={<Link className="btn" to="/shop">Shop now</Link>} />
       </StoreLayout>
     );
 
@@ -160,13 +164,13 @@ export default function Checkout() {
 
   return (
     <StoreLayout>
-      <div className="container page">
+      <div className="container page checkout-page">
         <div className="steps" aria-label="Checkout steps">
           <span>Bag</span>›<span className="on">Delivery & payment</span>›<span>Confirmation</span>
         </div>
-        <h1 className="display" style={{ marginBottom: 24 }}>
+        <BounceHeading className="display" style={{ marginBottom: 24 }}>
           Checkout
-        </h1>
+        </BounceHeading>
         {opts.requireVerifiedEmail && (
           <div className="alert alert-warning" style={{ marginBottom: 20 }}>
             <span>
@@ -316,6 +320,45 @@ export default function Checkout() {
 
           <aside className="sticky-summary">
             <Summary cart={opts.summary}>
+              <form
+                className="row"
+                style={{ marginTop: 14, "--gap": "6px" } as React.CSSProperties}
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const code = couponInput.trim().toUpperCase();
+                  const o = await load({ coupon: code });
+                  if (!o) return;
+                  if (o.summary.coupon) {
+                    setCoupon(code);
+                    storeCoupon(code);
+                    toast(`Coupon ${code} applied.`, "success");
+                  } else toast(o.summary.couponError ?? "This coupon can't be used.", "error");
+                }}
+              >
+                <label className="sr-only" htmlFor="checkout-coupon">
+                  Coupon code
+                </label>
+                <input id="checkout-coupon" className="input" style={{ flex: 1 }} placeholder="Coupon code" value={couponInput} onChange={(e) => setCouponInput(e.target.value)} />
+                {coupon ? (
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={() => {
+                      setCoupon("");
+                      setCouponInput("");
+                      storeCoupon("");
+                      load({ coupon: "" });
+                    }}
+                  >
+                    Remove
+                  </button>
+                ) : (
+                  <button type="submit" className="btn btn-outline btn-sm" disabled={!couponInput.trim()}>
+                    Apply
+                  </button>
+                )}
+              </form>
+              {coupon && opts.summary.couponError && <span className="field-error">{opts.summary.couponError}</span>}
               {placeError && (
                 <div className="alert alert-danger" role="alert" style={{ marginTop: 10 }}>
                   {placeError}

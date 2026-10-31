@@ -56,7 +56,7 @@ export default function ProductViewer3D({ url, title }: { url: string; title: st
     <div className="stack" style={{ "--gap": "10px" } as React.CSSProperties}>
       <div className="gallery-main" style={{ cursor: "grab", touchAction: "none" }} aria-label={`Interactive 3D model of ${title}. Drag to rotate, scroll or pinch to zoom.`} role="img">
         <Boundary fallback={<p className="small muted" style={{ padding: 20 }}>The 3D model couldn't be loaded on this device. The photos show the product.</p>}>
-          <Canvas key={key} dpr={[1, 1.75]} camera={{ position: [0, 0.6, 3], fov: 40 }} frameloop={motion === "reduced" ? "demand" : "always"}>
+          <Canvas key={key} dpr={[1, 1.75]} camera={{ position: [0, 0.6, 3], fov: 40 }} frameloop={motion === "reduced" ? "demand" : "always"} gl={{ preserveDrawingBuffer: true }}>
             <Suspense fallback={<Progress />}>
               <Bounds fit clip observe margin={1.2}>
                 <Model url={url} />

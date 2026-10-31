@@ -10,8 +10,92 @@ html {
   margin: 0;
   padding: 0;
   scroll-behavior: smooth;
+  /* clip (not hidden) so html/body never become scroll containers, which would break position: sticky */
   overflow-x: hidden;
+  overflow-x: clip;
   overflow-y: auto;
+}
+
+.home-scroll-progress {
+  position: fixed;
+  inset: 0 0 auto;
+  height: 2px;
+  z-index: 120;
+  pointer-events: none;
+  background: rgba(17, 17, 19, 0.08);
+}
+
+.home-scroll-progress__fill {
+  width: 100%;
+  height: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: linear-gradient(90deg, #9a7437 0%, #d7b36c 55%, #f1ddb0 100%);
+  box-shadow: 0 0 12px rgba(215, 179, 108, 0.45);
+}
+
+.cc-scroll-reveal {
+  opacity: 0;
+  transform: translate3d(0, 22px, 0);
+  transition: opacity 850ms cubic-bezier(0.2, 0.7, 0.2, 1), transform 850ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.cc-scroll-reveal.cc-scroll-revealed {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+.cc-scroll-reveal[data-scroll-reveal="section"] {
+  transform: translate3d(0, 10px, 0);
+}
+
+.cc-scroll-reveal[data-scroll-reveal="section"].cc-scroll-revealed {
+  transform: translate3d(0, 0, 0);
+}
+
+.cc-scroll-reveal[data-scroll-reveal="panel"] {
+  transform: translate3d(0, 22px, 0) scale(0.99);
+}
+
+.cc-scroll-reveal[data-scroll-reveal="panel"].cc-scroll-revealed {
+  transform: translate3d(0, 0, 0) scale(1);
+}
+
+.cc-scroll-reveal[data-scroll-reveal="image"] {
+  opacity: 0.78;
+  transform: scale(1.045);
+  transition-duration: 1300ms;
+}
+
+.cc-scroll-reveal[data-scroll-reveal="image"].cc-scroll-revealed {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.cc-scroll-reveal[data-scroll-reveal="item"] {
+  transform: translate3d(0, 12px, 0);
+  transition-duration: 720ms;
+  transition-delay: var(--reveal-delay, 0ms);
+}
+
+.cc-scroll-reveal[data-scroll-reveal="item"].cc-scroll-revealed {
+  transform: translate3d(0, 0, 0);
+}
+
+.cc-scroll-reveal:focus-within,
+.cc-scroll-reveal:focus-within .cc-scroll-reveal {
+  opacity: 1;
+  transform: none;
+}
+
+:root[data-motion="reduced"] {
+  scroll-behavior: auto !important;
+}
+
+:root[data-motion="reduced"] .cc-scroll-reveal {
+  opacity: 1 !important;
+  transform: none !important;
+  transition: none !important;
 }
 
 body {
@@ -19,6 +103,7 @@ body {
   margin: 0;
   padding: 0;
   overflow-x: hidden;
+  overflow-x: clip;
   overflow-y: visible;
   font-family: "Inter var", sans-serif;
   background: #d0d0d0;
@@ -91,3 +176,192 @@ a {
     display: none;
   }
 }
+
+/* Page-change wash (src/lib/pageWave.ts): the old page's snapshot sits on top and is carried off. */
+html.cc-page-wash::view-transition-old(root) {
+  z-index: 2;
+}
+
+html.cc-page-wash::view-transition-new(root) {
+  z-index: 1;
+}
+
+/* The new page's entrance animations wait until the wash has cleared. */
+html.cc-page-wave #root *,
+html.cc-page-wave #root *::before,
+html.cc-page-wave #root *::after {
+  animation-play-state: paused !important;
+}
+
+/* Intro crack (src/components/IntroReveal.tsx): copies of the intro screen, cut into
+   irregular pieces, laid exactly over the screen and dropped to reveal the page. */
+.page-crack {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.page-crack__piece {
+  position: absolute;
+  overflow: hidden;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+}
+
+/* A viewport-sized window onto one copy of the old page, scrolled to where it was. */
+.page-crack__view {
+  position: absolute;
+  overflow: hidden;
+  scrollbar-width: none;
+}
+
+.page-crack__view::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Custom cursor (src/components/Flair.tsx) — desktop mouse only ── */
+html.cc-cursor-on,
+html.cc-cursor-on * {
+  cursor: none !important;
+}
+
+html.cc-cursor-on input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+html.cc-cursor-on textarea,
+html.cc-cursor-on [contenteditable="true"] {
+  cursor: text !important;
+}
+
+.cc-cursor {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483600;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.cc-cursor.is-visible {
+  opacity: 1;
+}
+
+.cc-cursor.is-text {
+  opacity: 0;
+}
+
+.cc-cursor__dot,
+.cc-cursor__ring {
+  position: fixed;
+  top: 0;
+  left: 0;
+  border-radius: 50%;
+  will-change: transform;
+}
+
+.cc-cursor__dot {
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  background: #fff;
+  mix-blend-mode: difference;
+}
+
+.cc-cursor__ring {
+  display: grid;
+  place-items: center;
+  width: 0;
+  height: 0;
+}
+
+/* The visible ring is drawn by ::before so its size can ease without fighting the follow transform. */
+.cc-cursor__ring::before {
+  content: "";
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  mix-blend-mode: difference;
+  transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.3s, border-color 0.3s;
+}
+
+.cc-cursor.is-link .cc-cursor__ring::before {
+  width: 58px;
+  height: 58px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.cc-cursor.is-down .cc-cursor__ring::before {
+  width: 24px;
+  height: 24px;
+}
+
+.cc-cursor.is-view .cc-cursor__ring::before {
+  width: 84px;
+  height: 84px;
+  background: var(--metal);
+  border-color: var(--metal);
+  mix-blend-mode: normal;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+.cc-cursor__label {
+  position: relative;
+  font: 700 12px/1 "Manrope", system-ui, sans-serif;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #fff;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.2s, transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cc-cursor.is-view .cc-cursor__label {
+  opacity: 1;
+  transform: none;
+}
+
+.cc-cursor.is-view .cc-cursor__dot {
+  opacity: 0;
+}
+
+/* ── Image reveal (Flair.tsx): hidden until it scrolls in, then uncovered ── */
+.cc-reveal-pending {
+  opacity: 0;
+}
+
+/* ── Product photo magnifier (src/components/ZoomLens.tsx) ── */
+.zoom-lens {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28), inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  background-color: #fff;
+  background-repeat: no-repeat;
+  pointer-events: none;
+  opacity: 0;
+  scale: 0.6;
+  transition: opacity 0.18s, scale 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+
+.zoom-lens.is-on {
+  opacity: 1;
+  scale: 1;
+}
+
+/* ── Add-to-bag flight (src/lib/flyToBag.ts) ── */
+.bag-fly {
+  position: fixed;
+  z-index: 2147483500;
+  object-fit: cover;
+  border-radius: 18px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+

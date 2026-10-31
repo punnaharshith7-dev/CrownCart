@@ -20,9 +20,12 @@ const app = createApp(db);
 const dist = join(config.rootDir, "dist");
 if (config.isProd && existsSync(dist)) {
   const root = relative(process.cwd(), dist);
+  // Link previews (WhatsApp, X, Facebook…) need absolute image URLs, so the site address is filled in here.
+  const index = readFileSync(join(dist, "index.html"), "utf8").replace(/(content=")\/brand\//g, `$1${config.publicUrl}/brand/`);
+  app.get("/", (c) => c.html(index));
+  app.get("/index.html", (c) => c.html(index));
   app.use("/*", serveStatic({ root }));
   app.use("/uploads/*", serveStatic({ root: relative(process.cwd(), join(config.rootDir, "public")) }));
-  const index = readFileSync(join(dist, "index.html"), "utf8");
   app.get("*", (c) => c.html(index));
 }
 

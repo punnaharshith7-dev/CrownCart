@@ -1,0 +1,695 @@
+/* The store's finishing layer: one metallic accent, product stages, card hover, the editorial
+   product page, glass surfaces, empty states and shimmer. Loaded last; the immersive homepage
+   keeps its own styles. */
+
+/* ── One accent ── */
+:root,
+:root[data-theme="light"] {
+  --metal: #84651f;
+  --metal-deep: #a8812f;
+  --metal-soft: rgba(132, 101, 31, 0.1);
+  --focus: var(--metal);
+  --stage-glow: rgba(168, 129, 47, 0.14);
+  --stage-edge: #e7e7ec;
+  --stage-mid: #f6f6f8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --metal: #d9b26a;
+    --metal-deep: #9a7437;
+    --metal-soft: rgba(217, 178, 106, 0.12);
+    --stage-glow: rgba(217, 178, 106, 0.16);
+    --stage-edge: #0f0f13;
+    --stage-mid: #1b1b21;
+  }
+}
+
+:root[data-theme="dark"] {
+  --metal: #d9b26a;
+  --metal-deep: #9a7437;
+  --metal-soft: rgba(217, 178, 106, 0.12);
+  --focus: var(--metal);
+  --stage-glow: rgba(217, 178, 106, 0.16);
+  --stage-edge: #0f0f13;
+  --stage-mid: #1b1b21;
+}
+
+.stars {
+  color: var(--metal);
+}
+
+.chip.active,
+.chip[aria-pressed="true"],
+.variant[aria-pressed="true"] {
+  border-color: var(--metal);
+  background: var(--metal-soft);
+  color: var(--metal);
+}
+
+.check input,
+.review-photos__add input {
+  accent-color: var(--metal);
+}
+
+/* ── Prices: refined, aligned digits; the discount stays quiet ── */
+.price {
+  font-family: "Manrope", var(--font-body);
+  font-variant-numeric: lining-nums tabular-nums;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.price .now {
+  color: var(--metal);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.price .was {
+  font-size: 0.8em;
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+.price .off {
+  color: var(--muted);
+  font-size: 0.78em;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+/* ── Shop spacing ── */
+@media (min-width: 961px) {
+  .shop-layout {
+    grid-template-columns: 236px minmax(0, 1fr);
+    gap: clamp(32px, 4vw, 64px);
+  }
+}
+
+.product-grid {
+  gap: 24px;
+}
+
+/* ── Product stage: every product on the same soft background with a slight glow ── */
+.product-card {
+  border-color: var(--border);
+  transition: box-shadow 0.45s ease, border-color 0.45s ease;
+}
+
+.product-card:hover {
+  transform: none;
+  border-color: color-mix(in srgb, var(--metal) 40%, var(--border));
+  box-shadow: 0 26px 50px -24px rgba(0, 0, 0, 0.6);
+}
+
+.product-card .media,
+.gallery-main,
+.qv__main,
+.story-row__img.is-cutout {
+  background:
+    radial-gradient(58% 52% at 50% 46%, var(--stage-glow), transparent 72%),
+    radial-gradient(circle at 50% 42%, var(--stage-mid) 0%, var(--stage-edge) 100%);
+}
+
+.product-card .media {
+  position: relative;
+}
+
+.product-card .media .fit-image__main {
+  width: 100%;
+  height: 100%;
+}
+
+.media__cutout {
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
+  filter: drop-shadow(0 18px 22px rgba(0, 0, 0, 0.42));
+  transition: scale 0.6s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.4s ease;
+}
+
+/* The other photo fades in on hover. */
+.media__alt {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.5s ease, scale 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+  scale: 1.04;
+  pointer-events: none;
+}
+
+/* Sits above the image: small glass label. */
+.product-card .tag {
+  z-index: 3;
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(14, 14, 18, 0.48);
+  color: #f4f1ea;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-overflow: ellipsis;
+  -webkit-backdrop-filter: blur(10px) saturate(1.3);
+  backdrop-filter: blur(10px) saturate(1.3);
+}
+
+.product-card .tag.badge-danger {
+  color: #ffb4ad;
+}
+
+/* ── Card hover: lift, second photo, quick add ── */
+.product-card-wrap {
+  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Covers just the square photo, whatever the card's width. */
+.quick-add {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 10px;
+  pointer-events: none;
+}
+
+.quick-add__panel {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  background: rgba(14, 14, 18, 0.58);
+  color: #f4f1ea;
+  opacity: 0;
+  translate: 0 10px;
+  transition: opacity 0.3s ease, translate 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  backdrop-filter: blur(14px) saturate(1.3);
+}
+
+.quick-add__label {
+  font: 500 10.5px/1 "Manrope", var(--font-body);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.quick-add__one {
+  width: 100%;
+  padding: 3px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: 500 12px/1.4 "Manrope", var(--font-body);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.quick-add__one:hover {
+  color: #e9c98a;
+}
+
+.quick-add__sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.quick-add__sizes button {
+  min-width: 34px;
+  padding: 5px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: 500 11px/1 "Manrope", var(--font-body);
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.quick-add__sizes button:hover:not(:disabled) {
+  border-color: #e9c98a;
+  color: #e9c98a;
+}
+
+.quick-add__sizes button:disabled {
+  opacity: 0.35;
+  text-decoration: line-through;
+  cursor: not-allowed;
+}
+
+@media (hover: hover) {
+  .product-card-wrap:hover {
+    transform: translateY(-6px);
+  }
+
+  .product-card-wrap:hover .media__alt {
+    opacity: 1;
+    scale: 1;
+  }
+
+  .product-card-wrap:hover .quick-add__panel,
+  .quick-add__panel:focus-within {
+    opacity: 1;
+    translate: 0 0;
+    pointer-events: auto;
+  }
+}
+
+/* Keyboard users reach it without hovering; touch screens use Quick view instead. */
+.quick-add__panel:focus-within {
+  opacity: 1;
+  translate: 0 0;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .quick-add {
+    display: none;
+  }
+}
+
+/* ── Editorial product page ── */
+@media (min-width: 961px) {
+  .pdp {
+    grid-template-columns: minmax(0, 1.25fr) minmax(340px, 1fr);
+    gap: clamp(32px, 4vw, 64px);
+  }
+}
+
+.pdp-gallery__rail {
+  display: grid;
+  gap: 16px;
+}
+
+.pdp-gallery__rail .gallery-main {
+  position: relative;
+  width: 100%;
+  height: min(84vh, 880px);
+  padding: 0;
+  aspect-ratio: auto;
+}
+
+.gallery-main.is-cutout > img,
+.qv__main.is-cutout img {
+  width: 76%;
+  height: 76%;
+  filter: drop-shadow(0 26px 30px rgba(0, 0, 0, 0.45));
+}
+
+.gallery-skeleton {
+  height: min(84vh, 880px);
+  border-radius: var(--r-xl);
+}
+
+/* The name, price and buy button stay in view while the photos scroll past. */
+@media (min-width: 961px) {
+  .pdp-info {
+    position: sticky;
+    top: 88px;
+    max-height: calc(100vh - 104px);
+    overflow-y: auto;
+    padding-right: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+
+/* Phones and tablets: swipe through the photos instead of scrolling past them. */
+@media (max-width: 960px) {
+  .pdp {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pdp-gallery__rail {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+
+  .pdp-gallery__rail::-webkit-scrollbar {
+    display: none;
+  }
+
+  .pdp-gallery__rail .gallery-main {
+    flex: 0 0 88%;
+    height: auto;
+    aspect-ratio: 1;
+    scroll-snap-align: center;
+  }
+
+  .pdp-gallery__rail .gallery-main:only-child {
+    flex-basis: 100%;
+  }
+
+  .gallery-skeleton {
+    height: auto;
+    aspect-ratio: 1;
+  }
+}
+
+.pdp-story {
+  display: grid;
+  gap: clamp(64px, 9vw, 128px);
+  margin-top: clamp(64px, 9vw, 128px);
+}
+
+.story-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(28px, 6vw, 96px);
+}
+
+.story-row--flip .story-row__img {
+  order: 2;
+}
+
+.story-row__img {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  aspect-ratio: 5 / 4;
+  border-radius: var(--r-xl);
+  background: var(--surface-2);
+}
+
+.story-row__img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.story-row__img.is-cutout img {
+  width: 72%;
+  height: 72%;
+  object-fit: contain;
+  filter: drop-shadow(0 26px 30px rgba(0, 0, 0, 0.45));
+}
+
+.story-row__title {
+  margin: 0;
+  padding: 8px 0 22px;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 4vw, 56px);
+  font-weight: 700;
+  line-height: 1.04;
+  text-transform: uppercase;
+}
+
+.story-row__body {
+  max-width: 54ch;
+  color: var(--text-2);
+  font-size: clamp(15px, 1.2vw, 17px);
+  line-height: 1.75;
+}
+
+.spec-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--border);
+}
+
+.spec-tiles > div {
+  padding: 24px;
+  background: var(--bg);
+}
+
+.spec-tiles dt {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.spec-tiles dd {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(16px, 1.5vw, 20px);
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+@media (max-width: 760px) {
+  .story-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .story-row--flip .story-row__img {
+    order: 0;
+  }
+}
+
+/* ── Reviews with nothing to show yet ── */
+.reviews-empty {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: clamp(32px, 5vw, 56px) 20px;
+  border-block: 1px solid var(--border);
+  text-align: center;
+}
+
+.reviews-empty .stars {
+  font-size: 18px;
+  letter-spacing: 6px;
+  opacity: 0.7;
+}
+
+.reviews-empty__line {
+  margin: 0;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(24px, 3vw, 34px);
+  font-style: italic;
+  font-weight: 500;
+}
+
+/* ── Glass surfaces ── */
+.modal,
+.side-panel__sheet {
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  -webkit-backdrop-filter: blur(26px) saturate(1.35);
+  backdrop-filter: blur(26px) saturate(1.35);
+}
+
+.side-panel__sheet {
+  border-width: 0 0 0 1px;
+}
+
+/* Its shadow would otherwise show along the screen edge while it's closed. */
+.side-panel:not(.is-open) .side-panel__sheet {
+  box-shadow: none;
+}
+
+.side-panel__foot {
+  background: transparent;
+}
+
+.side-panel__backdrop {
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.modal {
+  animation: modal-rise 0.45s cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+@keyframes modal-rise {
+  from {
+    opacity: 0;
+    translate: 0 16px;
+    scale: 0.98;
+  }
+}
+
+.input,
+.select,
+.textarea {
+  border-width: 1px;
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.input:hover,
+.select:hover,
+.textarea:hover {
+  border-color: var(--border-strong);
+}
+
+.input[aria-invalid="true"],
+.select[aria-invalid="true"],
+.textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.checkout-page {
+  position: relative;
+  isolation: isolate;
+}
+
+.checkout-page::before {
+  content: "";
+  position: fixed;
+  top: -20vh;
+  right: -10vw;
+  z-index: -1;
+  width: 60vw;
+  height: 70vh;
+  background: radial-gradient(closest-side, var(--stage-glow), transparent);
+  pointer-events: none;
+}
+
+.checkout-page .card {
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  backdrop-filter: blur(18px) saturate(1.25);
+}
+
+/* Rating stars light up as you move across them and pop when chosen. */
+.star-pick {
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.18s ease, scale 0.18s ease;
+}
+
+.star-pick.is-on {
+  color: var(--metal);
+}
+
+.star-pick:hover {
+  scale: 1.16;
+}
+
+.star-pick__pop {
+  display: inline-block;
+  animation: star-pop 0.42s cubic-bezier(0.3, 1.7, 0.5, 1) both;
+  animation-delay: calc(var(--i) * 35ms);
+}
+
+@keyframes star-pop {
+  from {
+    scale: 0.55;
+    rotate: -18deg;
+  }
+}
+
+/* ── Empty states ── */
+.empty-art {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 112px;
+  height: 112px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--stage-glow), transparent);
+  color: var(--metal);
+}
+
+.empty-art svg {
+  width: 62px;
+  height: 62px;
+  animation: empty-float 4.5s ease-in-out infinite;
+}
+
+@keyframes empty-float {
+  50% {
+    translate: 0 -6px;
+  }
+}
+
+.empty .h2 {
+  text-wrap: balance;
+}
+
+/* ── Shimmer ── */
+.skeleton {
+  background: linear-gradient(100deg, var(--surface-2) 30%, color-mix(in srgb, var(--metal) 10%, var(--surface-3)) 50%, var(--surface-2) 70%);
+  background-size: 220% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+.shimmer-lines {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.shimmer-lines > .skeleton {
+  height: 14px;
+  border-radius: 6px;
+}
+
+.center-load > .shimmer-lines {
+  width: min(560px, 80%);
+}
+
+.card-skeleton {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+
+.card-skeleton__media {
+  aspect-ratio: 1;
+  border-radius: 0;
+}
+
+.card-skeleton__body {
+  padding: 16px;
+}
+
+.skeleton-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.skeleton-row > .skeleton {
+  height: 72px;
+  border-radius: 12px;
+}
+
+/* ── Reduced motion ── */
+[data-motion="reduced"] .product-card-wrap,
+[data-motion="reduced"] .media__alt,
+[data-motion="reduced"] .quick-add__panel {
+  transform: none !important;
+  translate: none !important;
+  transition: opacity 0.01s;
+}
+
+[data-motion="reduced"] .modal,
+[data-motion="reduced"] .star-pick__pop,
+[data-motion="reduced"] .empty-art svg,
+[data-motion="reduced"] .skeleton {
+  animation: none;
+}

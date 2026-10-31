@@ -212,13 +212,45 @@ export const PARTNER_TRANSITIONS: Record<DeliveryStatus, DeliveryStatus[]> = {
   assigned: ["accepted"],
   accepted: ["picked_up"],
   picked_up: ["in_transit", "out_for_delivery"],
-  in_transit: ["out_for_delivery"],
+  // Repeating in_transit lets the partner log each place the parcel passes through.
+  in_transit: ["in_transit", "out_for_delivery"],
   out_for_delivery: ["delivered", "attempted"],
   attempted: ["out_for_delivery", "failed"],
   failed: ["returned"],
   delivered: [],
   returned: [],
   cancelled: [],
+};
+
+/**
+ * Steps for a return pickup: collect from the customer (with an item photo), travel, hand over
+ * at the store. "failed" means the pickup couldn't happen; the store can arrange another.
+ */
+export const RETURN_TRANSITIONS: Record<DeliveryStatus, DeliveryStatus[]> = {
+  assigned: ["accepted"],
+  accepted: ["picked_up", "failed"],
+  picked_up: ["in_transit", "delivered"],
+  in_transit: ["in_transit", "delivered"],
+  out_for_delivery: [],
+  attempted: [],
+  failed: [],
+  delivered: [],
+  returned: [],
+  cancelled: [],
+};
+
+/** Labels for return pickups, where the parcel travels customer → store. */
+export const RETURN_STATUS_LABELS: Record<DeliveryStatus, string> = {
+  assigned: "Pickup assigned",
+  accepted: "Pickup accepted",
+  picked_up: "Picked up from customer",
+  in_transit: "On the way to the store",
+  out_for_delivery: "Out for delivery",
+  attempted: "Pickup attempted",
+  delivered: "Delivered to the store",
+  failed: "Pickup failed",
+  returned: "Returned",
+  cancelled: "Pickup cancelled",
 };
 
 export const DELIVERY_STATUS_LABELS: Record<DeliveryStatus, string> = {

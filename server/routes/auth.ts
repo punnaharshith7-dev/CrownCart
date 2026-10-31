@@ -7,6 +7,7 @@ import { hashPassword, randomToken, sha256, verifyPassword } from "../lib/crypto
 import { badRequest, conflict, forbidden, notFound, unauthorized } from "../lib/errors.ts";
 import { rateLimit } from "../lib/rate-limit.ts";
 import { body, email, newPassword } from "../lib/validate.ts";
+import { saveServiceArea, serviceAreaSchema } from "../lib/fulfilment.ts";
 import { audit } from "../lib/audit.ts";
 import { notify, sendEmail } from "../lib/notify.ts";
 import {
@@ -76,7 +77,7 @@ export const authRoutes = new Hono<AppEnv>()
       : 0;
     const unread = u ? db.get<{ n: number }>("SELECT COUNT(*) n FROM notifications WHERE user_id = ? AND read_at IS NULL", [u.id])!.n : 0;
     const prefs = u ? JSON.parse(db.get<{ preferences: string }>("SELECT preferences FROM users WHERE id = ?", [u.id])!.preferences) : null;
-    return c.json({ user: publicUser(u, db), cartCount, unreadNotifications: unread, preferences: prefs, integrations: { google: integrations().google } });
+    return c.json({ user: publicUser(u, db), cartCount, unreadNotifications: unread, preferences: prefs, integrations: { google: integrations().google, microsoft: integrations().microsoft } });
   })
 
   .post("/register", async (c) => {
@@ -294,7 +295,8 @@ export const authRoutes = new Hono<AppEnv>()
   .get("/invitations/:token", (c) => {
     const db = c.get("db");
     const inv = db.get(
-      `SELECT i.*, s.name AS store_name FROM invitations i LEFT JOIN stores s ON s.id = i.store_id
+      `SELECT i.*, COALESCE((SELECT group_concat(x.name, ', ') FROM invitation_stores m JOIN stores x ON x.id = m.store_id WHERE m.invitation_id = i.id), s.name) AS store_name
+         FROM invitations i LEFT JOIN stores s ON s.id = i.store_id
         WHERE i.token_hash = ? AND i.accepted_at IS NULL AND i.revoked_at IS NULL`,
       [sha256(c.req.param("token"))],
     );
@@ -313,15 +315,22 @@ export const authRoutes = new Hono<AppEnv>()
     if (!inv || inv.expires_at < new Date().toISOString()) throw notFound("This invitation is invalid or has expired.");
 
     const existing = db.get("SELECT * FROM users WHERE email = ?", [inv.email]);
-    let newAccount: { name: string; hash: string } | null = null;
     if (existing) {
       // An existing account must prove ownership by being signed in as it.
       const u = c.get("user");
       if (!u || u.id !== existing.id) throw unauthorized(`Sign in as ${inv.email} to accept this invitation.`);
-    } else {
-      const input = await body(c, z.object({ name: z.string().trim().min(2).max(80), password: newPassword }));
-      newAccount = { name: input.name, hash: await hashPassword(input.password) };
     }
+    const isPartner = inv.role_key === "delivery_partner";
+    const input = await body(
+      c,
+      z.object({
+        name: existing ? z.string().optional() : z.string().trim().min(2).max(80),
+        password: existing ? z.string().optional() : newPassword,
+        // Delivery partners say where they work (city, state, PIN codes) when they join.
+        serviceArea: isPartner ? serviceAreaSchema : serviceAreaSchema.optional(),
+      }),
+    );
+    const newAccount = existing ? null : { name: input.name!, hash: await hashPassword(input.password!) };
 
     const userId = db.tx(() => {
       // Re-check inside the transaction so two concurrent accepts cannot both win.
@@ -338,15 +347,21 @@ export const authRoutes = new Hono<AppEnv>()
         grantRole(db, userId, "customer", null);
       }
       grantRole(db, userId, inv.role_key, inv.invited_by);
-      if (inv.store_id) {
+      // Admin invites may cover several stores (invitation_stores); store team invites carry just store_id.
+      const storeIds = db.all<{ store_id: number }>(
+        "SELECT store_id FROM invitation_stores WHERE invitation_id = ? UNION SELECT store_id FROM invitations WHERE id = ? AND store_id IS NOT NULL",
+        [inv.id, inv.id],
+      );
+      for (const { store_id } of storeIds) {
         db.run(
           "INSERT INTO store_members (store_id, user_id, member_role) VALUES (?, ?, ?) ON CONFLICT(store_id, user_id) DO UPDATE SET member_role = excluded.member_role",
-          [inv.store_id, userId, inv.member_role ?? "owner"],
+          [store_id, userId, inv.member_role ?? "owner"],
         );
       }
-      if (inv.role_key === "delivery_partner") {
+      if (isPartner) {
         // Partners still need admin approval after accepting.
         db.run("INSERT OR IGNORE INTO delivery_partners (user_id, status) VALUES (?, 'pending')", [userId]);
+        saveServiceArea(db, userId, input.serviceArea!);
       }
       audit(db, {
         actorId: userId,

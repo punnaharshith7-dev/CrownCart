@@ -12,7 +12,7 @@ import { notify, sendEmail } from "../lib/notify.ts";
 import { parseRange, reportData, salesMetrics, toCsv } from "../lib/analytics.ts";
 import { ORDER_STATUS_LABELS, restockVariant, transitionOrder, type OrderStatus } from "../lib/orders.ts";
 import { cancelAndRefund, startRefund } from "../lib/payments.ts";
-import { approvedPartners, assignPartner, createShipment } from "../lib/fulfilment.ts";
+import { approvedPartners, assignPartner, autoAssignShipment, createReturnPickup, createShipment } from "../lib/fulfilment.ts";
 import { saveUpload } from "../lib/uploads.ts";
 import { splitRefund } from "../lib/credits.ts";
 import { randomToken, sha256 } from "../lib/crypto.ts";
@@ -69,6 +69,7 @@ const productSchema = z.object({
   name: z.string().trim().min(2).max(120),
   brand: z.string().trim().max(60).optional().nullable(),
   categoryId: id.nullable().optional(),
+  gender: z.enum(["men", "women", "unisex"]).nullable().optional(),
   titleLine1: z.string().trim().max(40).default(""),
   titleLine2: z.string().trim().max(40).default(""),
   accent: z.string().trim().max(40).default(""),
@@ -84,6 +85,8 @@ const productSchema = z.object({
   seoDescription: z.string().trim().max(160).optional().nullable(),
   specs: z.array(z.object({ label: z.string().trim().min(1).max(40), value: z.string().trim().min(1).max(200) })).max(30).default([]),
 });
+
+const ORIGINAL_PRICE_ERROR = "The original price must be higher than the current price.";
 
 const variantSchema = z.object({
   sku: z.string().trim().regex(/^[A-Za-z0-9._-]{2,40}$/, "SKU may use letters, numbers, dot, dash and underscore."),
@@ -115,6 +118,7 @@ function productAdminView(db: Db, productId: number) {
     brand: p.brand,
     categoryId: p.category_id,
     category: p.category,
+    gender: p.gender,
     titleLine1: p.title_line1,
     titleLine2: p.title_line2,
     accent: p.accent,
@@ -257,11 +261,11 @@ export const ownerRoutes = new Hono<AppEnv>()
     const productId = db.tx(() => {
       if (input.categoryId && !db.get("SELECT 1 FROM categories WHERE id = ? AND is_active = 1", [input.categoryId])) throw badRequest("Unknown category.");
       const pid = db.run(
-        `INSERT INTO products (store_id, brand_id, category_id, slug, name, title_line1, title_line2, accent, tagline, badge, description, care, warranty,
+        `INSERT INTO products (store_id, brand_id, category_id, gender, slug, name, title_line1, title_line2, accent, tagline, badge, description, care, warranty,
                                return_days, status, is_featured, seo_title, seo_description)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          storeId, brandIdFor(db, input.brand), input.categoryId ?? null, uniqueSlug(db, "products", `${input.brand ?? ""} ${input.name}`), input.name,
+          storeId, brandIdFor(db, input.brand), input.categoryId ?? null, input.gender ?? null, uniqueSlug(db, "products", `${input.brand ?? ""} ${input.name}`), input.name,
           input.titleLine1, input.titleLine2, input.accent, input.tagline, input.badge, input.description, input.care, input.warranty,
           input.returnDays, input.status, input.isFeatured ? 1 : 0, input.seoTitle ?? null, input.seoDescription ?? null,
         ],
@@ -269,6 +273,7 @@ export const ownerRoutes = new Hono<AppEnv>()
       writeSpecs(db, pid, input.specs);
       input.variants.forEach((v, i) => {
         if (db.get("SELECT 1 FROM product_variants WHERE sku = ?", [v.sku])) throw conflict(`SKU ${v.sku} is already in use.`);
+        if (v.compareAtPaise != null && v.compareAtPaise <= v.pricePaise) throw badRequest(ORIGINAL_PRICE_ERROR);
         const vid = db.run(
           "INSERT INTO product_variants (product_id, sku, name, color, size, price_paise, compare_at_paise, max_per_order, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           [pid, v.sku, v.name, v.color ?? null, v.size ?? null, v.pricePaise, v.compareAtPaise ?? null, v.maxPerOrder, v.isActive ? 1 : 0, i],
@@ -294,11 +299,11 @@ export const ownerRoutes = new Hono<AppEnv>()
         throw badRequest("Add at least one active variant before publishing.");
       }
       db.run(
-        `UPDATE products SET brand_id = ?, category_id = ?, name = ?, title_line1 = ?, title_line2 = ?, accent = ?, tagline = ?, badge = ?, description = ?,
+        `UPDATE products SET brand_id = ?, category_id = ?, gender = ?, name = ?, title_line1 = ?, title_line2 = ?, accent = ?, tagline = ?, badge = ?, description = ?,
                 care = ?, warranty = ?, return_days = ?, status = ?, is_featured = ?, seo_title = ?, seo_description = ?,
                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
         [
-          brandIdFor(db, input.brand), input.categoryId ?? null, input.name, input.titleLine1, input.titleLine2, input.accent, input.tagline, input.badge,
+          brandIdFor(db, input.brand), input.categoryId ?? null, input.gender ?? null, input.name, input.titleLine1, input.titleLine2, input.accent, input.tagline, input.badge,
           input.description, input.care, input.warranty, input.returnDays, input.status, input.isFeatured ? 1 : 0, input.seoTitle ?? null,
           input.seoDescription ?? null, p.id,
         ],
@@ -320,6 +325,7 @@ export const ownerRoutes = new Hono<AppEnv>()
     const p = storeProduct(db, storeId, Number(c.req.param("productId")));
     db.tx(() => {
       if (db.get("SELECT 1 FROM product_variants WHERE sku = ?", [v.sku])) throw conflict(`SKU ${v.sku} is already in use.`);
+      if (v.compareAtPaise != null && v.compareAtPaise <= v.pricePaise) throw badRequest(ORIGINAL_PRICE_ERROR);
       const vid = db.run(
         "INSERT INTO product_variants (product_id, sku, name, color, size, price_paise, compare_at_paise, max_per_order, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order),0)+1 FROM product_variants WHERE product_id = ?))",
         [p.id, v.sku, v.name, v.color ?? null, v.size ?? null, v.pricePaise, v.compareAtPaise ?? null, v.maxPerOrder, v.isActive ? 1 : 0, p.id],
@@ -339,7 +345,7 @@ export const ownerRoutes = new Hono<AppEnv>()
     const v = storeVariant(db, storeId, Number(c.req.param("variantId")));
     db.tx(() => {
       if (input.sku !== v.sku && db.get("SELECT 1 FROM product_variants WHERE sku = ?", [input.sku])) throw conflict(`SKU ${input.sku} is already in use.`);
-      if (input.compareAtPaise != null && input.compareAtPaise <= input.pricePaise) throw badRequest("The compare-at price must be higher than the selling price.");
+      if (input.compareAtPaise != null && input.compareAtPaise <= input.pricePaise) throw badRequest(ORIGINAL_PRICE_ERROR);
       db.run(
         "UPDATE product_variants SET sku = ?, name = ?, color = ?, size = ?, price_paise = ?, compare_at_paise = ?, max_per_order = ?, is_active = ? WHERE id = ?",
         [input.sku, input.name, input.color ?? null, input.size ?? null, input.pricePaise, input.compareAtPaise ?? null, input.maxPerOrder, input.isActive ? 1 : 0, v.id],
@@ -531,7 +537,10 @@ export const ownerRoutes = new Hono<AppEnv>()
     if (!(STORE_ORDER_ACTIONS[o.status as OrderStatus] ?? []).includes(input.to)) throw conflict(`This order can't move to "${ORDER_STATUS_LABELS[input.to]}" now.`);
     db.tx(() => {
       transitionOrder(db, o.id, input.to, u.id, input.note || (input.to === "processing" && o.status === "cancellation_requested" ? "Cancellation request declined." : ""));
-      if (input.to === "ready_for_dispatch") createShipment(db, o.id);
+      if (input.to === "ready_for_dispatch") {
+        createShipment(db, o.id);
+        autoAssignShipment(db, o.id, null);
+      }
       audit(db, { actorId: u.id, action: "order.status", entityType: "order", entityId: o.id, storeId, details: { from: o.status, to: input.to } });
     });
     return c.json({ order: orderDetail(db, db.get("SELECT * FROM orders WHERE id = ?", [o.id])!, "store") });
@@ -587,13 +596,22 @@ export const ownerRoutes = new Hono<AppEnv>()
   .post("/stores/:storeId/returns/:returnId", async (c) => {
     const storeId = sid(c);
     const u = requireStore(c, storeId, "store.orders");
-    const input = await body(c, z.object({ action: z.enum(["approve", "reject", "receive", "refund"]), note: z.string().trim().max(500).default(""), restock: z.boolean().default(true) }));
+    const input = await body(c, z.object({ action: z.enum(["approve", "reject", "receive", "refund", "pickup"]), note: z.string().trim().max(500).default(""), restock: z.boolean().default(true) }));
     const db = c.get("db");
     const r = db.get("SELECT rr.*, o.store_id, o.number, o.id AS oid FROM return_requests rr JOIN orders o ON o.id = rr.order_id WHERE rr.id = ? AND o.store_id = ?", [
       Number(c.req.param("returnId")),
       storeId,
     ]);
     if (!r) throw notFound("Return not found.");
+    // Arrange (another) courier pickup for an approved return, e.g. after a failed attempt.
+    if (input.action === "pickup") {
+      if (r.status !== "approved") throw conflict("Pickups can only be arranged for approved returns that haven't been collected.");
+      db.tx(() => {
+        createReturnPickup(db, r.id, u.id);
+        audit(db, { actorId: u.id, action: "return.pickup_arranged", entityType: "return", entityId: r.id, storeId });
+      });
+      return c.json({ order: orderDetail(db, db.get("SELECT * FROM orders WHERE id = ?", [r.oid])!, "store") });
+    }
     const next: Record<string, [string[], string]> = {
       approve: [["requested"], "approved"],
       reject: [["requested"], "rejected"],
@@ -615,9 +633,28 @@ export const ownerRoutes = new Hono<AppEnv>()
           if (input.restock) restockVariant(db, it.variant_id, it.quantity, "customer_return", String(r.oid), u.id);
         }
         transitionOrder(db, r.oid, "returned", u.id, "Returned items received.");
+        // Received some other way (e.g. dropped at the store): stand down any pickup still open.
+        for (const open of db.all(
+          `SELECT a.id, a.status, a.partner_user_id, s.id AS shipment_id, s.tracking_number FROM shipments s JOIN delivery_assignments a ON a.shipment_id = s.id
+            WHERE s.return_id = ? AND a.closed_at IS NULL AND a.status IN ('assigned', 'accepted')`,
+          [r.id],
+        )) {
+          db.run("UPDATE delivery_assignments SET status = 'cancelled', closed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?", [open.id]);
+          db.run("UPDATE shipments SET status = 'cancelled' WHERE id = ?", [open.shipment_id]);
+          db.run("INSERT INTO delivery_status_history (assignment_id, from_status, to_status, actor_user_id, reason) VALUES (?, ?, 'cancelled', ?, 'Items already received by the store')", [open.id, open.status, u.id]);
+          notify(db, open.partner_user_id, { type: "delivery.unassigned", title: `Pickup ${open.tracking_number} is no longer needed`, link: "/delivery" });
+        }
+        db.run("UPDATE shipments SET status = 'cancelled' WHERE return_id = ? AND status = 'awaiting_assignment'", [r.id]);
       }
       if (input.action === "approve") {
-        notify(db, r.user_id, { type: "return.approved", title: `Return approved for ${r.number}`, body: input.note || "Please keep the items ready in their original packaging.", link: `/account/orders/${r.number}` });
+        notify(db, r.user_id, {
+          type: "return.approved",
+          title: `Return approved for ${r.number}`,
+          body: input.note || "We're arranging a pickup from your delivery address. Keep the items ready in their original packaging.",
+          link: `/account/orders/${r.number}`,
+        });
+        // A courier pickup is arranged straight away for the approved return.
+        createReturnPickup(db, r.id, u.id);
       }
       if (input.action === "refund") {
         const o = db.get("SELECT * FROM orders WHERE id = ?", [r.oid])!;
@@ -704,7 +741,7 @@ export const ownerRoutes = new Hono<AppEnv>()
       sendEmail(db, input.email, `You're invited to ${store.name} on CrownCart`, `${u.name} invited you to help run ${store.name} as ${input.role.replace(/_/g, " ")}.\n\nAccept: ${config.publicUrl}/invite/${token}\n\nThis link expires in 7 days.`);
       audit(db, { actorId: u.id, action: "team.invited", entityType: "store", entityId: storeId, storeId, details: { email: input.email, role: input.role } });
     });
-    return c.json({ ok: true, ...(config.isProd ? {} : { devInviteUrl: `/invite/${token}` }) }, 201);
+    return c.json({ ok: true, ...(config.isProd || integrations().email ? {} : { devInviteUrl: `/invite/${token}` }) }, 201);
   })
 
   .delete("/stores/:storeId/team/:userId", (c) => {
@@ -889,8 +926,8 @@ export const ownerRoutes = new Hono<AppEnv>()
     const p = storeProduct(db, storeId, Number(c.req.param("productId")));
     const newId = db.tx(() => {
       const nid = db.run(
-        `INSERT INTO products (store_id, brand_id, category_id, slug, name, title_line1, title_line2, accent, tagline, badge, description, care, warranty, return_days, status, seo_title, seo_description)
-         SELECT store_id, brand_id, category_id, ?, name || ' (copy)', title_line1, title_line2, accent, tagline, badge, description, care, warranty, return_days, 'draft', seo_title, seo_description
+        `INSERT INTO products (store_id, brand_id, category_id, gender, slug, name, title_line1, title_line2, accent, tagline, badge, description, care, warranty, return_days, status, seo_title, seo_description)
+         SELECT store_id, brand_id, category_id, gender, ?, name || ' (copy)', title_line1, title_line2, accent, tagline, badge, description, care, warranty, return_days, 'draft', seo_title, seo_description
            FROM products WHERE id = ?`,
         [uniqueSlug(db, "products", `${p.slug}-copy`), p.id],
       ).lastId;

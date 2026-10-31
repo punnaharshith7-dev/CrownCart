@@ -5,7 +5,8 @@ import { homeFor, useAuth } from "../lib/auth";
 import { useTheme, type ThemePref } from "../lib/theme";
 import { inr } from "../lib/format";
 import { Announcement } from "./Announcement";
-import { Assistant } from "./Assistant";
+import { AssistantHeaderButton } from "./Assistant";
+import { openBag } from "./BagDrawer";
 
 interface Suggest {
   products: { slug: string; name: string; brand: string; image: string; pricePaise: number }[];
@@ -19,6 +20,26 @@ export function Highlight({ text, q }: { text: string; q: string }) {
   const terms = q.trim().split(/\s+/).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   const parts = text.split(new RegExp(`(${terms.join("|")})`, "ig"));
   return <>{parts.map((p, i) => (i % 2 ? <mark key={i}>{p}</mark> : p))}</>;
+}
+
+const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
+
+function BagIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M5 8h14l-1.2 12.1a1 1 0 0 1-1 .9H7.2a1 1 0 0 1-1-.9L5 8Z" />
+      <path d="M9 8V6.5a3 3 0 0 1 6 0V8" />
+    </svg>
+  );
+}
+
+function PersonIcon() {
+  return (
+    <svg {...iconProps}>
+      <circle cx="12" cy="8" r="3.6" />
+      <path d="M4.5 20.5c1.2-3.6 4-5.4 7.5-5.4s6.3 1.8 7.5 5.4" />
+    </svg>
+  );
 }
 
 const RECENT_KEY = "cc-recent-searches";
@@ -153,7 +174,8 @@ export function AccountMenu({ dark }: { dark?: boolean }) {
   return (
     <div className="menu" ref={ref}>
       <button type="button" className="icon-btn" aria-haspopup="menu" aria-expanded={open} aria-label="Account menu" onClick={() => setOpen((o) => !o)} style={dark ? { color: "#111", borderColor: "#111" } : undefined}>
-        ◉{unread > 0 && <span className="count-dot">{unread > 9 ? "9+" : unread}</span>}
+        <PersonIcon />
+        {unread > 0 && <span className="count-dot">{unread > 9 ? "9+" : unread}</span>}
       </button>
       {open && (
         <div className="menu-list" role="menu" onClick={(e) => (e.target as HTMLElement).closest("a") && setOpen(false)}>
@@ -201,14 +223,27 @@ export function SiteHeader() {
         <nav className="site-nav" aria-label="Main">
           <NavLink to="/shop">Shop</NavLink>
           <NavLink to="/collections">Collections</NavLink>
+          <NavLink to="/explore">Explore</NavLink>
           <NavLink to="/contact">Contact</NavLink>
         </nav>
         <SearchBox />
         <div className="header-actions">
-          <Link to="/cart" className="icon-btn" aria-label={`Bag, ${cartCount} item${cartCount === 1 ? "" : "s"}`}>
-            ⊞{cartCount > 0 && <span className="count-dot">{cartCount}</span>}
+          <Link
+            to="/cart"
+            className="icon-btn"
+            data-bag-target
+            aria-label={`Bag, ${cartCount} item${cartCount === 1 ? "" : "s"}`}
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+              e.preventDefault();
+              openBag();
+            }}
+          >
+            <BagIcon />
+            {cartCount > 0 && <span className="count-dot">{cartCount}</span>}
           </Link>
           <AccountMenu />
+          <AssistantHeaderButton />
         </div>
       </div>
     </header>
@@ -242,7 +277,6 @@ export function StoreLayout({ children }: { children: ReactNode }) {
       <SiteHeader />
       <main id="main">{children}</main>
       <SiteFooter />
-      <Assistant />
     </div>
   );
 }

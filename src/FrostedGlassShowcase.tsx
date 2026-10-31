@@ -1,9 +1,13 @@
-import { useState, useEffect, useContext } from "react";
+import { useState, useEffect, useContext, useRef, type CSSProperties } from "react";
+import "./styles/drop.css";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "./lib/auth";
 import { inr } from "./lib/format";
 import { HomeDataContext, type HomeData, type LiveProduct } from "./lib/homeData";
 import { ExploreMoreSection } from "./HomeSections";
+import { pageScrollBehavior } from "./lib/scroll";
+import { useTheme } from "./lib/theme";
+import { flyToBag } from "./lib/flyToBag";
 
 
 function ratingText(live: LiveProduct | undefined) {
@@ -13,7 +17,7 @@ function ratingText(live: LiveProduct | undefined) {
 }
 
 /** The showcase button: adds single-variant products to the bag, otherwise opens the product page to pick a size. */
-function AcquireButton({ live, name, style, hover }: { live?: LiveProduct; name: string; style: React.CSSProperties; hover: [React.CSSProperties, React.CSSProperties] }) {
+function AcquireButton({ live, name, className }: { live?: LiveProduct; name: string; className?: string }) {
   const { addToCart } = useAuth();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
@@ -23,6 +27,7 @@ function AcquireButton({ live, name, style, hover }: { live?: LiveProduct; name:
   return (
     <button
       type="button"
+      className={className}
       disabled={busy}
       aria-busy={busy || undefined}
       onClick={async () => {
@@ -32,16 +37,14 @@ function AcquireButton({ live, name, style, hover }: { live?: LiveProduct; name:
         const ok = await addToCart(live.defaultVariantId!, 1, { productName: name, returnTo: `/#product-${live.slug}` });
         setBusy(false);
         if (ok) {
+          flyToBag(document.querySelector(".drop-card.is-active .drop-card__img"));
           setAdded(true);
           setTimeout(() => setAdded(false), 2500);
         }
       }}
-      style={style}
-      onMouseEnter={(e) => Object.assign(e.currentTarget.style, hover[0])}
-      onMouseLeave={(e) => Object.assign(e.currentTarget.style, hover[1])}
     >
       <span>{busy ? "ADDING…" : label}</span>
-      <span style={{ fontSize: "14px" }}>→</span>
+      <span className="ex-btn__arrow" aria-hidden="true">→</span>
     </button>
   );
 }
@@ -60,11 +63,17 @@ export interface ProductItem {
   image: string;
   description: string;
   specs: { label: string; val: string }[];
+  /** Transparent cutout used on the drop stage. */
+  cutout: string;
+  /** Neon accent the stage glows with while this piece is up front. */
+  glow: string;
 }
 
 export const PRODUCTS: ProductItem[] = [
   {
     id: "shoe",
+    cutout: "/cutouts/air-jordan-1-retro-high-og-patent.webp",
+    glow: "#ff2e4d",
     num: "01",
     frameLabel: "FRAME 01 // AIR JORDAN 1 RETRO HIGH SPECIMEN",
     title1: "AIR JORDAN 1",
@@ -85,6 +94,8 @@ export const PRODUCTS: ProductItem[] = [
   },
   {
     id: "watch",
+    cutout: "/cutouts/patek-philippe-nautilus-5980-1r-rose-gold.webp",
+    glow: "#ffae5c",
     num: "02",
     frameLabel: "FRAME 02 // PATEK PHILIPPE GENÈVE",
     title1: "NAUTILUS",
@@ -106,6 +117,8 @@ export const PRODUCTS: ProductItem[] = [
   },
   {
     id: "bomber",
+    cutout: "/cutouts/armani-exchange-signature-bomber.webp",
+    glow: "#8b5cff",
     num: "03",
     frameLabel: "FRAME 03 // ARMANI EXCHANGE MILANO",
     title1: "ARMANI EX.",
@@ -126,6 +139,8 @@ export const PRODUCTS: ProductItem[] = [
   },
   {
     id: "laptop",
+    cutout: "/cutouts/asus-tuf-gaming-a15-mecha.webp",
+    glow: "#00e5ff",
     num: "04",
     frameLabel: "FRAME 04 // ASUS TUF GAMING MECHA",
     title1: "ASUS TUF",
@@ -146,628 +161,241 @@ export const PRODUCTS: ProductItem[] = [
   },
 ];
 
-/* Floating Right-Edge Specimen Telemetry Rail */
-export function SpecimenScrollRail() {
-  const [activeIdx, setActiveIdx] = useState(0);
-  const [visible, setVisible] = useState(false);
-  const [progress, setProgress] = useState(0);
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+/** Eases each step so a product settles and holds before the next one swings in. */
+const settle = (p: number) => {
+  const i = Math.floor(p);
+  const f = p - i;
+  return i + f * f * f * (f * (f * 6 - 15) + 10);
+};
+
+/* The drop stage: a pinned, dark 3D stage. Scrolling swings each piece through a
+   coverflow in depth. Everything per-frame is transform/opacity written straight to
+   the DOM from one rAF loop that only runs while the stage is on screen and moving. */
+export function ProductDrop() {
+  const home = useContext(HomeDataContext);
+  const { motion } = useTheme();
+  const [active, setActive] = useState(0);
+  const trackRef = useRef<HTMLElement>(null);
+  const sceneRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<(HTMLElement | null)[]>([]);
+  const glowRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const typeRef = useRef<HTMLDivElement>(null);
+  const floorRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const last = PRODUCTS.length - 1;
 
   useEffect(() => {
-    const handleScroll = () => {
-      const hero = document.getElementById("hero");
-      const heroBottom = hero ? hero.offsetTop + hero.offsetHeight - 100 : 500;
-      const explore = document.getElementById("explore-more");
-      const exploreTop = explore ? explore.offsetTop - 40 : 99999;
-      const curY = window.scrollY;
+    const track = trackRef.current;
+    if (!track) return;
+    const reduced = motion === "reduced";
+    let raf = 0;
+    let visible = false;
+    let shown = 0;
+    let current = -1;
+    const pointer = { x: 0, y: 0, cx: 0, cy: 0 };
 
-      setVisible(curY > heroBottom && curY < exploreTop);
+    const frame = () => {
+      raf = 0;
+      const rect = track.getBoundingClientRect();
+      const span = rect.height - window.innerHeight;
+      const raw = span > 0 ? clamp(-rect.top / span, 0, 1) : 0;
+      const target = settle(raw * last * 0.9999);
+      shown = reduced || current < 0 ? target : shown + (target - shown) * 0.14;
+      pointer.cx += (pointer.x - pointer.cx) * 0.08;
+      pointer.cy += (pointer.y - pointer.cy) * 0.08;
 
-      // Calculate progress through product sections
-      const secElements = PRODUCTS.map((p) => document.getElementById(`product-${p.id}`));
-      let current = 0;
-      secElements.forEach((el, idx) => {
-        if (el) {
-          const rect = el.getBoundingClientRect();
-          if (rect.top <= window.innerHeight * 0.55 && rect.bottom >= window.innerHeight * 0.2) {
-            current = idx;
-          }
+      const wide = window.innerWidth > 820;
+      const step = Math.min(window.innerWidth * (wide ? 0.3 : 0.62), 460);
+      cardRefs.current.forEach((card, i) => {
+        if (!card) return;
+        const d = i - shown;
+        const a = Math.abs(d);
+        if (a > 2.2) {
+          card.style.visibility = "hidden";
+          return;
         }
+        card.style.visibility = "visible";
+        const z = -a * 380 + (a < 1 ? (1 - a) * 80 : 0);
+        const ry = clamp(-d * 48, -70, 70);
+        card.style.transform = `translate3d(${d * step}px, ${a * 26}px, ${z}px) rotateY(${ry}deg)`;
+        card.style.opacity = String(clamp(1.15 - a * 0.55, 0, 1));
+        card.style.zIndex = String(100 - Math.round(a * 10));
       });
-      setActiveIdx(current);
+      glowRefs.current.forEach((g, i) => {
+        if (g) g.style.opacity = String(clamp(1 - Math.abs(i - shown), 0, 1));
+      });
+      if (sceneRef.current) sceneRef.current.style.transform = `rotateX(${4 - pointer.cy * 7}deg) rotateY(${pointer.cx * 9}deg)`;
+      if (typeRef.current) typeRef.current.style.transform = `translate3d(${-shown * 100}vw, 0, 0)`;
+      if (floorRef.current) floorRef.current.style.transform = `rotateX(76deg) translate3d(0, ${(shown * 240) % 80}px, 0)`;
+      if (barRef.current) barRef.current.style.transform = `scaleX(${last ? shown / last : 1})`;
 
-      setVisible(curY > heroBottom && curY < exploreTop);
-
-      const first = secElements[0];
-      const last = secElements[secElements.length - 1];
-      if (first && last) {
-        const start = first.offsetTop;
-        const totalHeight = last.offsetTop - start + last.offsetHeight;
-        const p = Math.max(0, Math.min(1, (curY - start) / totalHeight));
-        setProgress(p);
+      const idx = Math.round(shown);
+      if (idx !== current) {
+        current = idx;
+        setActive(idx);
       }
+      const moving = Math.abs(target - shown) > 0.0005 || Math.abs(pointer.x - pointer.cx) > 0.001 || Math.abs(pointer.y - pointer.cy) > 0.001;
+      if (visible && moving) raf = requestAnimationFrame(frame);
+    };
+    const kick = () => {
+      if (visible && !raf) raf = requestAnimationFrame(frame);
+    };
+    const onPointer = (e: PointerEvent) => {
+      if (reduced || e.pointerType !== "mouse") return;
+      pointer.x = e.clientX / window.innerWidth - 0.5;
+      pointer.y = e.clientY / window.innerHeight - 0.5;
+      kick();
     };
 
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    handleScroll();
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+    const io = new IntersectionObserver(([entry]) => {
+      visible = entry.isIntersecting;
+      kick();
+    });
+    io.observe(track);
+    window.addEventListener("scroll", kick, { passive: true });
+    window.addEventListener("resize", kick, { passive: true });
+    window.addEventListener("pointermove", onPointer, { passive: true });
+    visible = true;
+    kick();
+    return () => {
+      visible = false;
+      if (raf) cancelAnimationFrame(raf);
+      io.disconnect();
+      window.removeEventListener("scroll", kick);
+      window.removeEventListener("resize", kick);
+      window.removeEventListener("pointermove", onPointer);
+    };
+  }, [motion, last]);
 
-  if (!visible) return null;
-
-  return (
-    <aside
-      aria-label="Specimen directory"
-      style={{
-        position: "fixed",
-        right: "26px",
-        top: "50%",
-        transform: "translateY(-50%)",
-        zIndex: 99,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: "14px",
-        padding: "16px 8px",
-        background: "rgba(255, 255, 255, 0.25)",
-        backdropFilter: "blur(20px)",
-        WebkitBackdropFilter: "blur(20px)",
-        borderRadius: "28px",
-        border: "1px solid rgba(255, 255, 255, 0.35)",
-        boxShadow: "0 14px 38px rgba(0, 0, 0, 0.25)",
-        transition: "opacity 0.3s ease",
-      }}
-    >
-      <div
-        style={{
-          fontSize: "8.5px",
-          fontWeight: 700,
-          letterSpacing: "1.2px",
-          color: "rgba(0, 0, 0, 0.75)",
-          textTransform: "uppercase",
-        }}
-      >
-        SPECIMENS
-      </div>
-
-      {/* Progress track */}
-      <div
-        style={{
-          width: "2px",
-          height: "64px",
-          background: "rgba(0, 0, 0, 0.15)",
-          position: "relative",
-          borderRadius: "2px",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: `${progress * 100}%`,
-            background: "#000000",
-            transition: "height 0.15s ease-out",
-          }}
-        />
-      </div>
-
-      {PRODUCTS.map((prod, idx) => {
-        const isActive = activeIdx === idx;
-        return (
-          <button
-            type="button"
-            key={prod.id}
-            onClick={() => {
-              const el = document.getElementById(`product-${prod.id}`);
-              if (el) el.scrollIntoView({ behavior: "smooth" });
-            }}
-            style={{
-              cursor: "pointer",
-              border: "none",
-              background: isActive ? "#000000" : "transparent",
-              color: isActive ? "#ffffff" : "rgba(0, 0, 0, 0.4)",
-              width: "26px",
-              height: "26px",
-              borderRadius: "50%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "10.5px",
-              fontFamily: "'Inter', sans-serif",
-              fontWeight: isActive ? 700 : 500,
-              boxShadow: isActive ? "0 4px 12px rgba(0,0,0,0.4)" : "none",
-              transition: "all 0.2s ease",
-            }}
-            title={prod.title1}
-          >
-            {prod.num}
-          </button>
-        );
-      })}
-    </aside>
-  );
-}
-
-/* Luxury Hero Product Section (Real Photographic Backdrop + Full Native React/HTML UI) */
-interface LuxuryProductSectionProps {
-  product: ProductItem;
-  index: number;
-}
-
-export function LuxuryProductShowcaseSection({ product, index }: LuxuryProductSectionProps) {
-  const home = useContext(HomeDataContext);
-  const live = home?.showcase[index];
-
-  const openReviews = () => {
-    window.dispatchEvent(new CustomEvent("crowncart-open-reviews"));
+  const jump = (i: number) => {
+    const track = trackRef.current;
+    if (!track) return;
+    const span = track.offsetHeight - window.innerHeight;
+    window.scrollTo({ top: track.offsetTop + (span * i) / last + 2, behavior: pageScrollBehavior() });
   };
 
-  const isShoe = product.id === "shoe";
-  const isWatch = product.id === "watch";
-  const isBomber = product.id === "bomber";
-  const isLaptop = product.id === "laptop";
-
-  // Calibrated high-clarity background scaling and position matching target reference compositions
-  let bgStyle: React.CSSProperties = {
-    backgroundImage: `url("${product.image}")`,
-    backgroundSize: "cover",
-    backgroundPosition: "center center",
-    backgroundRepeat: "no-repeat",
-  };
-  let badgePosition = { top: "20%", left: "70%" };
-
-  if (isShoe) {
-    bgStyle = {
-      backgroundImage: `url("${product.image}")`,
-      backgroundSize: "cover",
-      backgroundPosition: "center center",
-      backgroundRepeat: "no-repeat",
-      filter: "brightness(0.98) contrast(1.05) saturate(1.05)",
-    };
-    badgePosition = { top: "23%", left: "69%" };
-  } else if (isWatch) {
-    bgStyle = {
-      backgroundImage: `url("${product.image}")`,
-      backgroundSize: "cover",
-      backgroundPosition: "center center",
-      backgroundRepeat: "no-repeat",
-      filter: "brightness(0.98) contrast(1.08) saturate(1.08)",
-    };
-    badgePosition = { top: "21%", left: "70%" };
-  } else if (isBomber) {
-    bgStyle = {
-      backgroundImage: `url("${product.image}")`,
-      backgroundSize: "cover",
-      backgroundPosition: "right 2% center",
-      backgroundRepeat: "no-repeat",
-      filter: "brightness(0.98) contrast(1.06) saturate(1.08)",
-    };
-    badgePosition = { top: "18%", left: "72%" };
-  } else if (isLaptop) {
-    bgStyle = {
-      backgroundImage: `url("${product.image}")`,
-      backgroundSize: "cover",
-      backgroundPosition: "right 2% center",
-      backgroundRepeat: "no-repeat",
-      filter: "brightness(0.98) contrast(1.1) saturate(1.12)",
-    };
-    badgePosition = { top: "14%", left: "72%" };
-  }
-
-  let gradientBackground = `
-    linear-gradient(90deg, 
-      #070709 0%, 
-      #070709 18%, 
-      rgba(7, 7, 9, 0.94) 28%, 
-      rgba(7, 7, 9, 0.78) 40%, 
-      rgba(7, 7, 9, 0.25) 52%, 
-      transparent 64%
-    ),
-    linear-gradient(180deg, 
-      rgba(7, 7, 9, 0.45) 0%, 
-      transparent 16%, 
-      transparent 84%, 
-      rgba(7, 7, 9, 0.65) 100%
-    )
-  `;
-
-  if (isShoe) {
-    gradientBackground = `
-      linear-gradient(90deg, 
-        rgba(7, 7, 9, 0.6) 0%, 
-        rgba(7, 7, 9, 0.45) 25%, 
-        rgba(7, 7, 9, 0.15) 40%, 
-        transparent 52%
-      ),
-      linear-gradient(180deg, 
-        rgba(7, 7, 9, 0.3) 0%, 
-        transparent 15%, 
-        transparent 85%, 
-        rgba(7, 7, 9, 0.45) 100%
-      )
-    `;
-  } else if (isWatch) {
-    gradientBackground = `
-      linear-gradient(90deg, 
-        #070709 0%, 
-        #070709 18%, 
-        rgba(7, 7, 9, 0.95) 28%, 
-        rgba(7, 7, 9, 0.8) 40%, 
-        rgba(7, 7, 9, 0.28) 52%, 
-        transparent 65%
-      ),
-      linear-gradient(180deg, 
-        rgba(7, 7, 9, 0.4) 0%, 
-        transparent 16%, 
-        transparent 84%, 
-        rgba(7, 7, 9, 0.6) 100%
-      )
-    `;
-  }
+  const product = PRODUCTS[active];
+  const live = home?.showcase[active];
+  const subtitle = product.title2.replace(/[“”"]/g, "");
+  const openReviews = () => window.dispatchEvent(new CustomEvent("crowncart-open-reviews"));
 
   return (
-    <section
-      id={`product-${product.id}`}
-      style={{
-        position: "relative",
-        width: "100vw",
-        minHeight: "100vh",
-        height: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "flex-start",
-        backgroundColor: "#070709",
-        overflow: "hidden",
-        boxSizing: "border-box",
-        padding: "0 clamp(24px, 4vw, 60px)",
-      }}
-    >
-      {/* Real High-Resolution Photographic Backdrop with Precise Positioning & Grading */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          inset: 0,
-          ...bgStyle,
-          zIndex: 1,
-        }}
-      />
+    <section ref={trackRef} className="drop" aria-label="The CrownCart drop" style={{ "--drop-count": PRODUCTS.length, "--drop-glow": product.glow } as CSSProperties}>
+      {/* Scroll targets so /#product-… links land on the right piece. */}
+      {PRODUCTS.map((p, i) => (
+        <span key={p.id} id={`product-${p.id}`} className="drop-anchor" style={{ top: `${(i / PRODUCTS.length) * 100}%` }} />
+      ))}
 
-      {/* Cinematic Multi-Stop Dark Gradient Fade & Vignette Overlay */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: gradientBackground,
-          zIndex: 2,
-          pointerEvents: "none",
-        }}
-      />
-
-      {/* Floating Pill Badge over Product (ICONIC GRAIL / HAUTE HORLOGERIE) */}
-      <div
-        style={{
-          position: "absolute",
-          top: badgePosition.top,
-          left: badgePosition.left,
-          transform: "translateX(-50%)",
-          zIndex: 4,
-          padding: "5px 14px",
-          backgroundColor: "rgba(0, 0, 0, 0.65)",
-          backdropFilter: "blur(10px)",
-          WebkitBackdropFilter: "blur(10px)",
-          border: "1px solid rgba(255, 255, 255, 0.25)",
-          borderRadius: "6px",
-          color: "#ffffff",
-          fontSize: "10px",
-          fontWeight: 700,
-          letterSpacing: "2px",
-          textTransform: "uppercase",
-          userSelect: "none",
-          boxShadow: "0 6px 20px rgba(0, 0, 0, 0.4)",
-        }}
-      >
-        {product.badge}
-      </div>
-
-      {/* Main Left Content Container */}
-      <div
-        style={{
-          position: "relative",
-          zIndex: 3,
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "center",
-          gap: "clamp(20px, 3.2vw, 40px)",
-          maxWidth: "100%",
-          paddingTop: "20px",
-        }}
-      >
-        {/* Giant Subtle Background Watermark Numeral ("01" / "02") */}
-        <div
-          aria-hidden="true"
-          style={{
-            fontFamily: "'Inter', sans-serif",
-            fontSize: "clamp(120px, 14vw, 195px)",
-            fontWeight: 800,
-            color: "rgba(255, 255, 255, 0.12)",
-            lineHeight: 0.85,
-            letterSpacing: "-6px",
-            userSelect: "none",
-            pointerEvents: "none",
-            flexShrink: 0,
-          }}
-        >
-          {product.num}
+      <div className="drop-stage">
+        {PRODUCTS.map((p, i) => (
+          <div
+            key={p.id}
+            ref={(el) => {
+              glowRefs.current[i] = el;
+            }}
+            className="drop-aura"
+            style={{ "--glow": p.glow, opacity: i === 0 ? 1 : 0 } as CSSProperties}
+            aria-hidden="true"
+          />
+        ))}
+        <div className="drop-floor-wrap" aria-hidden="true">
+          <div ref={floorRef} className="drop-floor" />
+        </div>
+        <div className="drop-type" aria-hidden="true">
+          <div ref={typeRef} className="drop-type__strip">
+            {PRODUCTS.map((p) => (
+              <span key={p.id}>{p.title1}</span>
+            ))}
+          </div>
         </div>
 
-        {/* Specifications & Info Column with Vertical Divider */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            position: "relative",
-            maxWidth: "480px",
-          }}
-        >
-          {/* Top Numeral "0 1" / "0 2" above the vertical line */}
-          <div
-            style={{
-              fontFamily: "'Inter', sans-serif",
-              fontSize: "16px",
-              fontWeight: 400,
-              letterSpacing: "4px",
-              color: "rgba(255, 255, 255, 0.85)",
-              marginBottom: "8px",
-              paddingLeft: "2px",
-            }}
-          >
-            {product.num.split("").join(" ")}
-          </div>
+        <header className="drop-head">
+          <span className="drop-head__tag">
+            <i /> LIVE DROP
+          </span>
+          <span className="drop-head__title">THE CROWN ROSTER</span>
+          <span className="drop-head__count">
+            {String(active + 1).padStart(2, "0")}
+            <em>/{String(PRODUCTS.length).padStart(2, "0")}</em>
+          </span>
+        </header>
 
-          {/* Bordered Block */}
-          <div
-            style={{
-              borderLeft: "1px solid rgba(255, 255, 255, 0.35)",
-              paddingLeft: "26px",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            {/* Title Block */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-              <h2
-                style={{
-                  fontFamily: "'Inter', sans-serif",
-                  fontWeight: 800,
-                  fontSize: "clamp(26px, 3.2vw, 40px)",
-                  letterSpacing: "-1.5px",
-                  lineHeight: "1.02em",
-                  margin: 0,
-                  color: "#ffffff",
-                  textTransform: "uppercase",
+        <div className="drop-viewport">
+          <div ref={sceneRef} className="drop-scene">
+            {PRODUCTS.map((p, i) => (
+              <article
+                key={p.id}
+                ref={(el) => {
+                  cardRefs.current[i] = el;
                 }}
+                className={`drop-card${i === active ? " is-active" : ""}`}
+                style={{ "--glow": p.glow } as CSSProperties}
+                onClick={() => i !== active && jump(i)}
               >
-                {product.title1}
-              </h2>
-
-              <h2
-                style={{
-                  fontFamily: "'Inter', sans-serif",
-                  fontWeight: 800,
-                  fontSize: "clamp(26px, 3.2vw, 40px)",
-                  letterSpacing: "-1.5px",
-                  lineHeight: "1.02em",
-                  margin: 0,
-                  color: "#ffffff",
-                }}
-              >
-                {product.title2}
-              </h2>
-
-              <h2
-                style={{
-                  fontFamily: "'Inter', sans-serif",
-                  fontWeight: 800,
-                  fontSize: "clamp(26px, 3.2vw, 40px)",
-                  letterSpacing: "-1.5px",
-                  lineHeight: "1.02em",
-                  margin: 0,
-                }}
-              >
-                <span
-                  style={{
-                    WebkitTextStroke: "1.5px rgba(255, 255, 255, 0.65)",
-                    color: "transparent",
-                  }}
-                >
-                  {product.accent}
-                </span>
-              </h2>
-            </div>
-
-            {/* Category / Sub-heading */}
-            <p
-              style={{
-                fontFamily: "'Inter', sans-serif",
-                fontWeight: 400,
-                fontSize: "13.5px",
-                letterSpacing: "0.2px",
-                margin: "10px 0 14px 0",
-                color: "rgba(255, 255, 255, 0.75)",
-              }}
-            >
-              {product.category}
-            </p>
-
-            {/* Price & Rating */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                marginBottom: "14px",
-                flexWrap: "wrap",
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: "'Space Mono', monospace, sans-serif",
-                  fontSize: "14px",
-                  fontWeight: 500,
-                  color: "#ffffff",
-                  padding: "4px 12px",
-                  border: "1px solid rgba(255, 255, 255, 0.35)",
-                  borderRadius: "6px",
-                  backgroundColor: "rgba(0, 0, 0, 0.4)",
-                  backdropFilter: "blur(6px)",
-                  letterSpacing: "0.5px",
-                }}
-              >
-                {live ? inr(live.pricePaise) : product.price}
-              </div>
-
-              {live?.compareAtPaise && (
-                <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", textDecoration: "line-through" }}>{inr(live.compareAtPaise)}</span>
-              )}
-
-              {product.priceSub && (
-                <span
-                  style={{
-                    fontSize: "10px",
-                    fontWeight: 700,
-                    letterSpacing: "1px",
-                    color: "rgba(255, 255, 255, 0.65)",
-                    padding: "4px 8px",
-                    backgroundColor: "rgba(255, 255, 255, 0.08)",
-                    border: "1px solid rgba(255, 255, 255, 0.12)",
-                    borderRadius: "4px",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {product.priceSub}
-                </span>
-              )}
-
-              <span
-                onClick={openReviews}
-                style={{
-                  fontSize: "12px",
-                  color: "rgba(255, 255, 255, 0.8)",
-                  fontWeight: 500,
-                  cursor: "pointer",
-                }}
-                title="View customer reviews"
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && openReviews()}
-              >
-                {ratingText(live)}
-              </span>
-              {live && !live.inStock && (
-                <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "1px", color: "#ffb4ab", textTransform: "uppercase" }}>Out of stock</span>
-              )}
-            </div>
-
-            {/* Description Paragraph */}
-            <p
-              style={{
-                fontFamily: "'Inter', sans-serif",
-                fontSize: "12.5px",
-                lineHeight: "1.65em",
-                color: "rgba(255, 255, 255, 0.7)",
-                marginBottom: "18px",
-                maxWidth: "440px",
-              }}
-            >
-              {product.description}
-            </p>
-
-            {/* Specs Grid */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "8px 20px",
-                padding: "10px 0",
-                borderTop: "1px solid rgba(255, 255, 255, 0.18)",
-                borderBottom: "1px solid rgba(255, 255, 255, 0.18)",
-                marginBottom: "20px",
-                maxWidth: "440px",
-              }}
-            >
-              {product.specs.map((s, idx) => (
-                <div key={idx}>
-                  <div
-                    style={{
-                      fontSize: "9.5px",
-                      textTransform: "uppercase",
-                      letterSpacing: "1.2px",
-                      color: "rgba(255, 255, 255, 0.45)",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {s.label}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "11.5px",
-                      fontWeight: 500,
-                      color: "rgba(255, 255, 255, 0.95)",
-                      marginTop: "2px",
-                    }}
-                  >
-                    {s.val}
-                  </div>
+                <div className="drop-card__face">
+                  <span className="drop-card__num">{p.num}</span>
+                  <span className="drop-card__badge">{p.badge}</span>
+                  <div className="drop-card__halo" />
+                  <img className="drop-card__img" src={p.cutout} alt={`${p.title1} ${p.title2.replace(/[“”"]/g, "")}`} loading={i < 2 ? "eager" : "lazy"} decoding="async" draggable={false} />
+                  <div className="drop-card__shine" />
+                  <span className="drop-card__label">{p.frameLabel}</span>
                 </div>
-              ))}
-            </div>
-
-            {/* Action Button: ACQUIRE NOW */}
-            <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
-              <AcquireButton
-                live={live}
-                name={`${product.title1} ${product.title2}`.replace(/[“”"]/g, "")}
-                style={{
-                  cursor: "pointer",
-                  padding: "9px 20px",
-                  backgroundColor: "#000000",
-                  color: "#ffffff",
-                  border: "1px solid rgba(255, 255, 255, 0.55)",
-                  borderRadius: "6px",
-                  fontFamily: "'Inter', sans-serif",
-                  fontSize: "11px",
-                  fontWeight: 700,
-                  letterSpacing: "2px",
-                  textTransform: "uppercase",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  transition: "all 0.15s ease",
-                  boxShadow: "0 4px 14px rgba(0, 0, 0, 0.4)",
-                }}
-                hover={[
-                  { backgroundColor: "#161616", borderColor: "#ffffff" },
-                  { backgroundColor: "#000000", borderColor: "rgba(255, 255, 255, 0.55)" },
-                ]}
-              />
-              {live && (
-                <Link to={`/product/${live.slug}`} style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", letterSpacing: "1.5px", textTransform: "uppercase", textDecoration: "underline", textUnderlineOffset: "4px" }}>
-                  Details
-                </Link>
-              )}
-            </div>
+              </article>
+            ))}
           </div>
         </div>
+
+        <div className="drop-info" key={product.id}>
+          <p className="drop-info__kicker">{product.category}</p>
+          <h2 className="drop-info__title">
+            {product.title1} <span>{subtitle}</span>
+          </h2>
+          <div className="drop-info__price">
+            <strong>{live ? inr(live.pricePaise) : product.price}</strong>
+            {live?.compareAtPaise && <s>{inr(live.compareAtPaise)}</s>}
+            {live && !live.inStock && <b>SOLD OUT</b>}
+            {live && (
+              <button type="button" className="drop-info__rating" onClick={openReviews} title="View customer reviews">
+                {ratingText(live)}
+              </button>
+            )}
+          </div>
+          <ul className="drop-info__specs">
+            {product.specs.slice(0, 3).map((s) => (
+              <li key={s.label}>
+                <span>{s.label}</span>
+                {s.val}
+              </li>
+            ))}
+          </ul>
+          <div className="drop-info__actions">
+            <AcquireButton className="drop-btn drop-btn--hot" live={live} name={`${product.title1} ${subtitle}`} />
+            {live && (
+              <Link className="drop-btn" to={`/product/${live.slug}`}>
+                <span>DETAILS</span>
+                <span className="ex-btn__arrow" aria-hidden="true">↗</span>
+              </Link>
+            )}
+          </div>
+        </div>
+
+        <nav className="drop-dots" aria-label="Jump to a product">
+          {PRODUCTS.map((p, i) => (
+            <button key={p.id} type="button" className={i === active ? "is-active" : ""} onClick={() => jump(i)} aria-current={i === active || undefined} title={p.title1}>
+              {p.num}
+            </button>
+          ))}
+          <div className="drop-dots__bar">
+            <div ref={barRef} />
+          </div>
+        </nav>
       </div>
     </section>
   );
 }
 
-/* Master stacked showcase: products, closing sections and the telemetry rail */
+/* Master showcase: the drop stage followed by the closing sections. */
 export function StackedProductsShowcase() {
   const [home, setHome] = useState<HomeData | null>(null);
   useEffect(() => {
@@ -779,12 +407,10 @@ export function StackedProductsShowcase() {
   return (
     <HomeDataContext.Provider value={home}>
       <div style={{ width: "100%", overflow: "visible", position: "relative" }}>
-        <SpecimenScrollRail />
-        {PRODUCTS.map((product, idx) => (
-          <LuxuryProductShowcaseSection key={product.id} product={product} index={idx} />
-        ))}
+        <ProductDrop />
         <ExploreMoreSection />
       </div>
     </HomeDataContext.Provider>
   );
 }
+

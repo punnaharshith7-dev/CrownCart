@@ -1,6 +1,6 @@
 import type { Db } from "./db.ts";
-import { hashPassword } from "./lib/crypto.ts";
 import { ADMIN_PERMISSIONS, ROLE_PERMISSIONS, ROLES, type RoleKey } from "./lib/permissions.ts";
+import { EXTENDED_PRODUCTS } from "./catalog-data.ts";
 
 /** Roles and permissions. Idempotent; runs on every start so code and DB agree. */
 export function ensureReferenceData(db: Db) {
@@ -66,6 +66,7 @@ const PRODUCTS = [
       name: size,
       size,
       price: 1699500,
+      compareAt: 1999500,
       stock: [3, 6, 6, 4, 2][i],
       max: 2,
     })),
@@ -120,7 +121,7 @@ const PRODUCTS = [
       ["Fit", "Ergonomic Modern Bomber Silhouette"],
       ["Branding", "Screened A|X Contrast Chest Monogram"],
     ],
-    variants: ["S", "M", "L", "XL"].map((size, i) => ({ sku: `AX-BMB-${size}`, name: size, size, price: 2499900, stock: [4, 8, 8, 0][i], max: 3 })),
+    variants: ["S", "M", "L", "XL"].map((size, i) => ({ sku: `AX-BMB-${size}`, name: size, size, price: 2499900, compareAt: 2899900, stock: [4, 8, 8, 0][i], max: 3 })),
   },
   {
     slug: "asus-tuf-gaming-a15-mecha",
@@ -146,7 +147,7 @@ const PRODUCTS = [
       ["Display", "15.6\" 144Hz FHD IPS Adaptive-Sync"],
       ["Durability", "MIL-STD-810H Military Standard"],
     ],
-    variants: [{ sku: "ASUS-TUF-A15-R7-4060", name: "16GB / 1TB SSD", size: null, price: 8999000, stock: 10, max: 2 }],
+    variants: [{ sku: "ASUS-TUF-A15-R7-4060", name: "16GB / 1TB SSD", size: null, price: 8999000, compareAt: 9999000, stock: 10, max: 2 }],
   },
 ];
 
@@ -155,81 +156,60 @@ export function seedCatalog(db: Db) {
   db.tx(() => {
     // 3D models shipped with the original site, attached once to their products.
     for (const p of PRODUCTS) {
-      const row = db.get("SELECT id FROM products WHERE slug = ?", [p.slug]);
-      if (row && !db.get("SELECT 1 FROM product_media WHERE product_id = ? AND kind = 'model'", [row.id])) {
+      const row = db.get<{ id: number }>("SELECT id FROM products WHERE slug = ?", [p.slug]);
+      if (row && p.model && !db.get("SELECT 1 FROM product_media WHERE product_id = ? AND kind = 'model'", [row.id])) {
         db.run("INSERT INTO product_media (product_id, kind, url, alt, sort_order) VALUES (?, 'model', ?, ?, 50)", [row.id, p.model, `${p.name} — 3D model`]);
       }
     }
     CATEGORIES.forEach((c, i) =>
       db.run("INSERT OR IGNORE INTO categories (name, slug, description, sort_order) VALUES (?, ?, ?, ?)", [c.name, c.slug, c.description, i]),
     );
-    let store = db.get("SELECT id FROM stores WHERE slug = 'crowncart-flagship'");
+    let store = db.get<{ id: number }>("SELECT id FROM stores WHERE slug = 'crowncart-flagship'");
     if (!store) {
       const id = db.run(
         "INSERT INTO stores (name, slug, description, status, pickup_address, pickup_pincode) VALUES ('CrownCart Flagship', 'crowncart-flagship', 'The original CrownCart collection.', 'active', 'CrownCart Flagship Store', '560001')",
       ).lastId;
       store = { id };
     }
-    PRODUCTS.forEach((p, i) => {
-      if (db.get("SELECT 1 FROM products WHERE slug = ?", [p.slug])) return;
-      let brand = db.get("SELECT id FROM brands WHERE name = ?", [p.brand]);
-      if (!brand) brand = { id: db.run("INSERT INTO brands (name, slug) VALUES (?, ?)", [p.brand, p.brand.toLowerCase().replace(/[^a-z0-9]+/g, "-")]).lastId };
-      const cat = db.get("SELECT id FROM categories WHERE slug = ?", [p.category])!;
-      const pid = db.run(
-        `INSERT INTO products (store_id, brand_id, category_id, slug, name, title_line1, title_line2, accent, tagline, badge, description, care, warranty,
-                               return_days, status, is_featured, showcase_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?)`,
-        [store.id, brand.id, cat.id, p.slug, p.name, p.titleLine1, p.titleLine2, p.accent, p.tagline, p.badge, p.description, p.care, p.warranty, p.returnDays, i + 1],
-      ).lastId;
-      p.specs.forEach(([label, value], j) => db.run("INSERT INTO product_specs (product_id, label, value, sort_order) VALUES (?, ?, ?, ?)", [pid, label, value, j]));
-      db.run("INSERT INTO product_media (product_id, kind, url, alt, sort_order) VALUES (?, 'image', ?, ?, 0)", [pid, p.image, p.name]);
-      db.run("INSERT INTO product_media (product_id, kind, url, alt, sort_order) VALUES (?, 'hero', ?, ?, 1)", [pid, p.hero, `${p.name} — editorial photograph`]);
-      db.run("INSERT INTO product_media (product_id, kind, url, alt, sort_order) VALUES (?, 'model', ?, ?, 50)", [pid, p.model, `${p.name} — 3D model`]);
-      p.variants.forEach((v, j) => {
-        const vid = db.run(
-          "INSERT INTO product_variants (product_id, sku, name, size, price_paise, max_per_order, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [pid, v.sku, v.name, v.size, v.price, v.max, j],
+    const allProducts = [...PRODUCTS, ...EXTENDED_PRODUCTS];
+    allProducts.forEach((p, i) => {
+      let prodRow = db.get<{ id: number }>("SELECT id FROM products WHERE slug = ?", [p.slug]);
+      let pid: number;
+      if (!prodRow) {
+        let brand = db.get<{ id: number }>("SELECT id FROM brands WHERE name = ?", [p.brand]);
+        if (!brand) {
+          const brandSlug = p.brand.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+          brand = { id: db.run("INSERT INTO brands (name, slug) VALUES (?, ?)", [p.brand, brandSlug]).lastId };
+        }
+        const cat = db.get<{ id: number }>("SELECT id FROM categories WHERE slug = ?", [p.category])!;
+        pid = db.run(
+          `INSERT INTO products (store_id, brand_id, category_id, slug, name, title_line1, title_line2, accent, tagline, badge, description, care, warranty,
+                                 return_days, status, is_featured, showcase_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?)`,
+          [store.id, brand.id, cat.id, p.slug, p.name, p.titleLine1, p.titleLine2, p.accent, p.tagline, p.badge, p.description, p.care, p.warranty, p.returnDays, i < 4 ? i + 1 : null],
         ).lastId;
-        db.run("INSERT INTO inventory (variant_id, on_hand, low_stock_threshold) VALUES (?, ?, 2)", [vid, v.stock]);
-        if (v.stock) db.run("INSERT INTO inventory_movements (variant_id, delta_on_hand, reason) VALUES (?, ?, 'initial_stock')", [vid, v.stock]);
-      });
+        p.specs.forEach(([label, value], j) => db.run("INSERT INTO product_specs (product_id, label, value, sort_order) VALUES (?, ?, ?, ?)", [pid, label, value, j]));
+        db.run("INSERT INTO product_media (product_id, kind, url, alt, sort_order) VALUES (?, 'image', ?, ?, 0)", [pid, p.image, p.name]);
+        db.run("INSERT INTO product_media (product_id, kind, url, alt, sort_order) VALUES (?, 'hero', ?, ?, 1)", [pid, p.hero, `${p.name} — editorial photograph`]);
+        if (p.model) {
+          db.run("INSERT INTO product_media (product_id, kind, url, alt, sort_order) VALUES (?, 'model', ?, ?, 50)", [pid, p.model, `${p.name} — 3D model`]);
+        }
+        p.variants.forEach((v: any, j: number) => {
+          const vid = db.run(
+            "INSERT INTO product_variants (product_id, sku, name, size, price_paise, compare_at_paise, max_per_order, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [pid, v.sku, v.name, v.size ?? null, v.price, v.compareAt ?? null, v.max, j],
+          ).lastId;
+          db.run("INSERT INTO inventory (variant_id, on_hand, low_stock_threshold) VALUES (?, ?, 2)", [vid, v.stock]);
+          if (v.stock) db.run("INSERT INTO inventory_movements (variant_id, delta_on_hand, reason) VALUES (?, ?, 'initial_stock')", [vid, v.stock]);
+        });
+      } else {
+        pid = prodRow.id;
+        p.variants.forEach((v: any) => {
+          if (v.compareAt) {
+            db.run("UPDATE product_variants SET compare_at_paise = ? WHERE product_id = ? AND sku = ? AND (compare_at_paise IS NULL OR compare_at_paise = 0)", [v.compareAt, pid, v.sku]);
+          }
+        });
+      }
     });
   });
-}
-
-/**
- * Development accounts, one per role. Never run in production: the server
- * refuses (see server/index.ts). Passwords come from SEED_PASSWORD.
- */
-export async function seedDevAccounts(db: Db, password: string) {
-  const hash = await hashPassword(password);
-  const accounts: { email: string; name: string; roles: RoleKey[] }[] = [
-    { email: "admin@crowncart.local", name: "Platform Admin", roles: ["customer", "platform_admin"] },
-    { email: "owner@crowncart.local", name: "Store Owner", roles: ["customer", "store_owner"] },
-    { email: "rider@crowncart.local", name: "Delivery Partner", roles: ["customer", "delivery_partner"] },
-    { email: "customer@crowncart.local", name: "Demo Customer", roles: ["customer"] },
-  ];
-  db.tx(() => {
-    for (const a of accounts) {
-      if (db.get("SELECT 1 FROM users WHERE email = ?", [a.email])) continue;
-      const id = db.run(
-        "INSERT INTO users (email, password_hash, name, email_verified_at, preferences) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), '{\"theme\":\"system\"}')",
-        [a.email, hash, a.name],
-      ).lastId;
-      for (const r of a.roles) db.run("INSERT INTO user_roles (user_id, role_id) SELECT ?, id FROM roles WHERE key = ?", [id, r]);
-      if (a.roles.includes("store_owner")) {
-        db.run("INSERT INTO store_members (store_id, user_id, member_role) SELECT id, ?, 'owner' FROM stores WHERE slug = 'crowncart-flagship'", [id]);
-      }
-      if (a.roles.includes("delivery_partner")) {
-        db.run("INSERT INTO delivery_partners (user_id, status, availability, service_pincodes, vehicle, approved_at) VALUES (?, 'approved', 'available', '560', 'Motorbike', strftime('%Y-%m-%dT%H:%M:%fZ','now'))", [id]);
-      }
-      if (a.email.startsWith("customer@")) {
-        db.run("INSERT INTO addresses (user_id, label, name, phone, line1, city, state, pincode, is_default) VALUES (?, 'Home', 'Demo Customer', '9876543210', '12 MG Road', 'Bengaluru', 'Karnataka', '560001', 1)", [id]);
-      }
-    }
-    db.run(
-      "INSERT OR IGNORE INTO coupons (code, kind, value, max_discount_paise, first_order_only, description) VALUES ('WELCOME10', 'percent', 10, 100000, 1, '10% off your first order (up to ₹1,000).')",
-    );
-  });
-  return accounts.map((a) => a.email);
 }

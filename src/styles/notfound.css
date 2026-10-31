@@ -1,0 +1,224 @@
+/* 404: the cart rolls in, snaps an axle, tips forward and spills its goods; the lost wheel becomes the "0". */
+.nf {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 48px 16px 72px;
+  text-align: center;
+  color: var(--text);
+  overflow: hidden;
+}
+
+.nf-code {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.06em;
+  margin: 0;
+  font: 700 clamp(88px, 22vw, 168px) / 1 var(--font-display);
+  letter-spacing: -0.02em;
+}
+.nf-digit {
+  display: inline-block;
+  animation: nf-drop 0.7s cubic-bezier(0.3, 1.4, 0.5, 1) both;
+}
+/* The second 4 lands late and crooked. */
+.nf-digit-late {
+  animation: nf-drop-crooked 0.9s cubic-bezier(0.3, 1.4, 0.5, 1) 1.9s both;
+}
+.nf-wheel {
+  display: inline-block;
+  width: 0.72em;
+  height: 0.72em;
+  animation: nf-roll 1.1s cubic-bezier(0.2, 0.8, 0.3, 1) 0.9s both;
+}
+.nf-wheel svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.nf-scene {
+  appearance: none;
+  display: block;
+  width: 100%;
+  max-width: 440px;
+  margin: 8px auto 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+.nf-scene:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+  border-radius: 12px;
+}
+.nf-scene svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.nf-floor {
+  stroke: var(--border-strong);
+  stroke-width: 2;
+  stroke-dasharray: 6 8;
+}
+
+.nf-rig {
+  animation: nf-enter 0.8s cubic-bezier(0.25, 0.9, 0.35, 1) both;
+}
+.nf-cart {
+  transform-box: view-box;
+  transform-origin: 112px 232px; /* rear wheel's contact point */
+  animation:
+    nf-tip 0.6s cubic-bezier(0.4, 1.6, 0.5, 1) 0.75s both,
+    nf-wobble 3.2s ease-in-out 2.6s infinite;
+}
+.nf-piece {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nf-spill 1.1s cubic-bezier(0.33, 0, 0.67, 1) both;
+}
+
+.nf-title {
+  margin: 28px 0 8px;
+  font: 700 clamp(24px, 5vw, 34px) / 1.15 var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  animation: nf-fade 0.5s ease 1.6s both;
+}
+.nf-copy {
+  margin: 0 auto;
+  max-width: 440px;
+  color: var(--text-2);
+  line-height: 1.6;
+  animation: nf-fade 0.5s ease 1.75s both;
+}
+.nf-copy code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--gold-soft);
+  color: var(--text);
+  font-size: 0.9em;
+  word-break: break-all;
+}
+.nf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+  animation: nf-fade 0.5s ease 1.9s both;
+}
+.nf-hint {
+  margin-top: 20px;
+  font-size: 12px;
+  color: var(--muted);
+  animation: nf-fade 0.5s ease 2.8s both;
+}
+
+@keyframes nf-drop {
+  from {
+    transform: translateY(-120%);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes nf-drop-crooked {
+  from {
+    transform: translateY(-120%) rotate(-20deg);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0.04em) rotate(9deg);
+    opacity: 1;
+  }
+}
+@keyframes nf-roll {
+  from {
+    transform: translateX(70vw) rotate(900deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  80% {
+    transform: translateX(-0.06em) rotate(-12deg);
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes nf-enter {
+  from {
+    transform: translateX(-120%);
+  }
+  80% {
+    transform: translateX(6px);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes nf-tip {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(12deg);
+  }
+}
+@keyframes nf-wobble {
+  0%,
+  100% {
+    transform: rotate(12deg);
+  }
+  50% {
+    transform: rotate(10.5deg);
+  }
+}
+@keyframes nf-spill {
+  from {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  25% {
+    transform: translate(calc(var(--dx) * 0.3), -40px) rotate(calc(var(--r) * 0.3));
+  }
+  60% {
+    transform: translate(calc(var(--dx) * 0.8), var(--dy)) rotate(calc(var(--r) * 0.8));
+  }
+  75% {
+    transform: translate(calc(var(--dx) * 0.92), calc(var(--dy) - 16px)) rotate(calc(var(--r) * 0.92));
+  }
+  88%,
+  to {
+    transform: translate(var(--dx), var(--dy)) rotate(var(--r));
+  }
+}
+@keyframes nf-fade {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Reduced motion: skip straight to the aftermath. */
+@media (prefers-reduced-motion: reduce) {
+  .nf *,
+  .nf *::before,
+  .nf *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+  }
+}

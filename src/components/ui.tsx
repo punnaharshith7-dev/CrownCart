@@ -182,9 +182,50 @@ export function StatusBadge({ status, label }: { status: string; label?: string 
   return <span className={`badge${tone ? ` badge-${tone}` : ""}`}>{label ?? status.replace(/_/g, " ")}</span>;
 }
 
-export function Empty({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
+const ART: Record<string, ReactNode> = {
+  bag: (
+    <>
+      <path d="M16 24h32l3 28H13z" />
+      <path d="M24 30v-9a8 8 0 0 1 16 0v9" />
+    </>
+  ),
+  wish: <path d="M32 52S12 40 12 25.5A10.5 10.5 0 0 1 32 21a10.5 10.5 0 0 1 20 4.5C52 40 32 52 32 52z" />,
+  search: (
+    <>
+      <circle cx="28" cy="28" r="15" />
+      <path d="m39 39 13 13" />
+      <path d="M21 28a7 7 0 0 1 7-7" />
+    </>
+  ),
+  orders: (
+    <>
+      <path d="m32 11 20 10v22L32 53 12 43V21z" />
+      <path d="m12 21 20 10 20-10M32 31v22M22 16l20 10" />
+    </>
+  ),
+  bell: (
+    <>
+      <path d="M18 44V28a14 14 0 0 1 28 0v16l4 4H14z" />
+      <path d="M27 53a5 5 0 0 0 10 0" />
+    </>
+  ),
+};
+
+/** A small line drawing in the accent colour, with a soft glow, for empty pages. */
+export function EmptyArt({ art }: { art: string }) {
+  return (
+    <span className="empty-art" aria-hidden="true">
+      <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        {ART[art]}
+      </svg>
+    </span>
+  );
+}
+
+export function Empty({ title, children, action, art }: { title: string; children?: ReactNode; action?: ReactNode; art?: keyof typeof ART }) {
   return (
     <div className="empty">
+      {art && <EmptyArt art={art} />}
       <div className="h2">{title}</div>
       {children && <p className="muted" style={{ maxWidth: 440, margin: "0 auto" }}>{children}</p>}
       {action && <div style={{ marginTop: 20 }}>{action}</div>}
@@ -212,8 +253,30 @@ export function ErrorState({ error, retry }: { error: unknown; retry?: () => voi
 
 export function Loading() {
   return (
-    <div className="center-load">
-      <Spinner />
+    <div className="center-load" role="status" aria-label="Loading">
+      <div className="shimmer-lines" aria-hidden="true">
+        <div className="skeleton" style={{ width: "42%", height: 34 }} />
+        <div className="skeleton" style={{ width: "88%" }} />
+        <div className="skeleton" style={{ width: "72%" }} />
+        <div className="skeleton" style={{ width: "80%" }} />
+      </div>
+    </div>
+  );
+}
+
+/** Shimmering rows shaped like a list of items with a thumbnail (bag lines, orders). */
+export function RowSkeletons({ n = 3 }: { n?: number }) {
+  return (
+    <div className="stack" role="status" aria-label="Loading">
+      {Array.from({ length: n }, (_, i) => (
+        <div key={i} className="skeleton-row" aria-hidden="true">
+          <div className="skeleton" />
+          <div className="shimmer-lines">
+            <div className="skeleton" style={{ width: "60%" }} />
+            <div className="skeleton" style={{ width: "38%" }} />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -221,14 +284,20 @@ export function Loading() {
 /** Accessible dialog: traps focus, closes on Escape, restores focus on close, locks background scroll. */
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Callers pass inline onClose handlers; keep the latest in a ref so the setup below runs once
+  // per open. Re-running it on every render stole focus from the field being typed in.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const first = ref.current?.querySelector<HTMLElement>("input, select, textarea, button, a[href]");
+    const first =
+      ref.current?.querySelector<HTMLElement>(".modal-body input, .modal-body select, .modal-body textarea") ??
+      ref.current?.querySelector<HTMLElement>("input, select, textarea, button, a[href]");
     first?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") closeRef.current();
       if (e.key === "Tab" && ref.current) {
         const els = [...ref.current.querySelectorAll<HTMLElement>("input, select, textarea, button, a[href], [tabindex]:not([tabindex='-1'])")].filter((el) => !el.hasAttribute("disabled"));
         if (!els.length) return;
@@ -243,7 +312,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
       document.body.style.overflow = overflow;
       prev?.focus();
     };
-  }, [onClose]);
+  }, []);
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" ref={ref} style={wide ? { width: "min(760px, 100%)" } : undefined}>
@@ -255,7 +324,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
             ✕
           </button>
         </div>
-        {children}
+        <div className="modal-body">{children}</div>
       </div>
     </div>
   );

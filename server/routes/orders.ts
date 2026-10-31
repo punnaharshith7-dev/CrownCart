@@ -5,9 +5,11 @@ import type { Db, Row } from "../db.ts";
 import { badRequest, conflict, notFound } from "../lib/errors.ts";
 import { body } from "../lib/validate.ts";
 import { requireUser } from "../lib/auth.ts";
-import { DELIVERY_STATUS_LABELS, ORDER_STATUS_LABELS, transitionOrder, type DeliveryStatus, type OrderStatus } from "../lib/orders.ts";
+import { DELIVERY_STATUS_LABELS, ORDER_STATUS_LABELS, RETURN_STATUS_LABELS, transitionOrder, type DeliveryStatus, type OrderStatus } from "../lib/orders.ts";
+import { deliveryPhotoUrl } from "./delivery.ts";
 import { cancelAndRefund } from "../lib/payments.ts";
 import { notifyMany } from "../lib/notify.ts";
+import { REVIEWABLE_ORDER_STATUSES } from "../lib/reviews.ts";
 import { getSetting } from "../lib/settings.ts";
 import { rateLimit } from "../lib/rate-limit.ts";
 
@@ -23,6 +25,8 @@ export function orderSummary(o: Row) {
     paymentStatus: o.payment_status,
     totalPaise: o.total_paise,
     placedAt: o.placed_at ?? o.created_at,
+    // Latest delivery step the partner ticked off, with where it happened.
+    tracking: o.track_status ? { status: o.track_status, label: DELIVERY_STATUS_LABELS[o.track_status as DeliveryStatus], location: o.track_location, at: o.track_at } : null,
     itemCount: o.item_count,
     preview: o.preview,
     storeName: o.store_name,
@@ -33,8 +37,12 @@ export function orderSummary(o: Row) {
 export const ORDER_LIST_SQL = `
   SELECT o.*, s.name AS store_name, u.name AS customer_name,
          (SELECT SUM(quantity) FROM order_items WHERE order_id = o.id) AS item_count,
-         (SELECT image FROM order_items WHERE order_id = o.id LIMIT 1) AS preview
-    FROM orders o JOIN stores s ON s.id = o.store_id JOIN users u ON u.id = o.user_id`;
+         (SELECT image FROM order_items WHERE order_id = o.id LIMIT 1) AS preview,
+         t.to_status AS track_status, t.location AS track_location, t.created_at AS track_at
+    FROM orders o
+    LEFT JOIN delivery_status_history t ON t.id = (
+      SELECT h.id FROM delivery_status_history h JOIN delivery_assignments a ON a.id = h.assignment_id JOIN shipments sh ON sh.id = a.shipment_id
+       WHERE sh.order_id = o.id AND h.to_status != 'cancelled' ORDER BY h.id DESC LIMIT 1) JOIN stores s ON s.id = o.store_id JOIN users u ON u.id = o.user_id`;
 
 /**
  * Full order view. `audience` controls how much is revealed: customers never
@@ -53,8 +61,9 @@ export function orderDetail(db: Db, order: Row, audience: "customer" | "store" |
       "SELECT a.*, u.name AS partner_name, u.phone AS partner_phone FROM delivery_assignments a JOIN users u ON u.id = a.partner_user_id WHERE a.shipment_id = ? ORDER BY a.id DESC LIMIT 1",
       [s.id],
     );
+    const labels = s.kind === "return" ? RETURN_STATUS_LABELS : DELIVERY_STATUS_LABELS;
     const events = assignment
-      ? db.all("SELECT to_status, reason, created_at FROM delivery_status_history WHERE assignment_id IN (SELECT id FROM delivery_assignments WHERE shipment_id = ?) ORDER BY id", [s.id])
+      ? db.all("SELECT to_status, reason, location, photo, created_at FROM delivery_status_history WHERE assignment_id IN (SELECT id FROM delivery_assignments WHERE shipment_id = ?) ORDER BY id", [s.id])
       : [];
     const courierEvents =
       s.carrier === "shiprocket"
@@ -65,10 +74,11 @@ export function orderDetail(db: Db, order: Row, audience: "customer" | "store" |
             at: e.occurred_at,
           }))
         : [];
-    const pod = assignment ? db.get("SELECT recipient_name, otp_verified, delivered_at, notes FROM proof_of_delivery WHERE assignment_id = ?", [assignment.id]) : null;
+    const pod = assignment ? db.get("SELECT recipient_name, otp_verified, delivered_at, notes, photo_path FROM proof_of_delivery WHERE assignment_id = ?", [assignment.id]) : null;
     return {
       id: s.id,
       kind: s.kind,
+      kindLabel: s.kind === "return" ? "Return pickup" : "Delivery",
       trackingNumber: s.tracking_number,
       carrier: s.carrier,
       courierName: s.courier_name,
@@ -80,12 +90,23 @@ export function orderDetail(db: Db, order: Row, audience: "customer" | "store" |
             name: audience === "customer" ? assignment.partner_name.split(" ")[0] : assignment.partner_name,
             phone: audience === "customer" && !["out_for_delivery", "attempted"].includes(assignment.status) ? null : assignment.partner_phone,
             status: assignment.status,
-            statusLabel: DELIVERY_STATUS_LABELS[assignment.status as DeliveryStatus],
+            statusLabel: labels[assignment.status as DeliveryStatus],
             failureReason: assignment.failure_reason,
           }
         : null,
-      events: [...events.map((e) => ({ status: e.to_status, label: DELIVERY_STATUS_LABELS[e.to_status as DeliveryStatus], reason: e.reason, at: e.created_at })), ...courierEvents],
-      proof: pod ? { recipientName: pod.recipient_name, otpVerified: Boolean(pod.otp_verified), deliveredAt: pod.delivered_at, notes: audience === "customer" ? "" : pod.notes } : null,
+      events: [
+        ...events.map((e) => ({ status: e.to_status, label: labels[e.to_status as DeliveryStatus], reason: e.reason, location: e.location || null, photo: deliveryPhotoUrl(e.photo), at: e.created_at })),
+        ...courierEvents,
+      ],
+      proof: pod
+        ? {
+            recipientName: pod.recipient_name,
+            otpVerified: Boolean(pod.otp_verified),
+            deliveredAt: pod.delivered_at,
+            notes: audience === "customer" ? "" : pod.notes,
+            photo: deliveryPhotoUrl(pod.photo_path),
+          }
+        : null,
     };
   });
   const returns = db.all("SELECT * FROM return_requests WHERE order_id = ? ORDER BY id", [order.id]).map((r) => ({
@@ -118,6 +139,14 @@ export function orderDetail(db: Db, order: Row, audience: "customer" | "store" |
     returnDeadline != null &&
     returnDeadline > new Date().toISOString() &&
     items.some((i) => i.quantity > i.returned_qty);
+
+  // The customer's own rating of each line, or whether they can leave one.
+  const reviewsOpen = audience === "customer" && getSetting(db, "features").reviews && REVIEWABLE_ORDER_STATUSES.includes(order.status);
+  const itemReview = (productId: number) => {
+    if (audience !== "customer") return {};
+    const review = db.get("SELECT rating, status FROM reviews WHERE product_id = ? AND user_id = ?", [productId, order.user_id]) ?? null;
+    return { review, canReview: reviewsOpen && !review && Boolean(db.get("SELECT 1 FROM products WHERE id = ? AND status = 'active'", [productId])) };
+  };
 
   return {
     ...orderSummary({ ...order, store_name: store.name, item_count: items.reduce((s, i) => s + i.quantity, 0), preview: items[0]?.image }),
@@ -155,6 +184,7 @@ export function orderDetail(db: Db, order: Row, audience: "customer" | "store" |
       returnedQty: i.returned_qty,
       lineTotalPaise: i.line_total_paise,
       productSlug: db.get("SELECT slug FROM products WHERE id = ?", [i.product_id])?.slug,
+      ...itemReview(i.product_id),
     })),
     history: history.map((h) => ({
       from: h.from_status,

@@ -6,7 +6,7 @@ export const SETTING_DEFAULTS = {
     name: "CrownCart",
     tagline: "Beyond Ordinary.",
     supportingLine: "Discover a world of extraordinary choices.",
-    supportEmail: "support@crowncart.local",
+    supportEmail: "crowncart.admin@gmail.com",
     supportPhone: "",
   },
   homepage: {
@@ -20,13 +20,13 @@ export const SETTING_DEFAULTS = {
       { key: "contact", number: "05", label: "Contact", description: "Customer support & enquiries", visible: true },
     ],
   },
-  shipping: { flatPaise: 14900, freeThresholdPaise: 500000, estimateDaysMin: 3, estimateDaysMax: 7, serviceablePincodePrefixes: [] as string[] },
+  shipping: { flatPaise: 14900, freeThresholdPaise: 129900, estimateDaysMin: 3, estimateDaysMax: 7, serviceablePincodePrefixes: [] as string[] },
   cod: { enabled: true, maxOrderPaise: 5000000 },
   checkout: { requireVerifiedEmail: true, paymentWindowMinutes: 30 },
   tax: { mode: "inclusive", note: "All prices are inclusive of applicable GST." },
-  delivery: { requireOtp: true },
+  /** autoAssign: hand ready orders to the nearest available partner by PIN code. */
+  delivery: { requireOtp: true, autoAssign: true, requirePhoto: true },
   returns: { enabled: true },
-  reviews: { requireModeration: true, verifiedPurchaseOnly: false },
   maintenance: { enabled: false, message: "CrownCart is undergoing scheduled maintenance. Please check back shortly." },
   features: { wishlist: true, reviews: true, coupons: true, assistant: true, viewer3d: true },
   /** 1 point is worth pointValuePaise; points are earned on delivered orders. */

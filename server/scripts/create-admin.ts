@@ -1,5 +1,5 @@
 // Secure first-administrator provisioning:
-//   INITIAL_ADMIN_EMAIL=you@example.com INITIAL_ADMIN_PASSWORD='…' npm run create-admin
+//   INITIAL_ADMIN_EMAIL=crowncart.admin@gmail.comINITIAL_ADMIN_PASSWORD='…' npm run create-admin
 // The password is read from the environment so it never lands in shell history as an argument.
 import { config } from "../config.ts";
 import { Db } from "../db.ts";

@@ -147,6 +147,11 @@ export function requireStore(c: Ctx, storeId: number, permission: StorePermissio
     "SELECT m.member_role, s.status FROM store_members m JOIN stores s ON s.id = m.store_id WHERE m.store_id = ? AND m.user_id = ?",
     [storeId, u.id],
   );
+  // Platform catalog admins may list and edit products in any store, including suspended ones.
+  if (!m && (permission === "store.products" || permission === "store.inventory") && u.permissions.has("admin.catalog")) {
+    if (!db.get("SELECT 1 FROM stores WHERE id = ?", [storeId])) throw notFound("Store not found.");
+    return u;
+  }
   if (!m) throw notFound("Store not found.");
   if (m.status === "suspended") throw forbidden("This store is suspended. Contact CrownCart support.");
   if (!MEMBER_ROLE_PERMISSIONS[m.member_role].includes(permission)) throw forbidden();
@@ -167,5 +172,7 @@ export function publicUser(u: SessionUser | null, db: Db) {
     permissions: [...u.permissions],
     stores: storeRolesFor(db, u.id).map((s) => ({ id: s.store_id, name: s.name, slug: s.slug, status: s.status, role: s.member_role })),
     deliveryPartner: partner ? { status: partner.status, availability: partner.availability } : null,
+    // True until a new account saves or skips the "tell us about you" step.
+    needsProfile: !db.get("SELECT profile_prompted_at FROM users WHERE id = ?", [u.id])?.profile_prompted_at,
   };
 }

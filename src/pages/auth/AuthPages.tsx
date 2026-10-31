@@ -1,48 +1,15 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, api, errorMessage } from "../../lib/api";
-import { homeFor, useAuth } from "../../lib/auth";
+import { landingAfterSignIn, useAuth, type Me } from "../../lib/auth";
 import { safeReturnTo } from "../../lib/format";
-import { useTitle } from "../../lib/useApi";
 import { Button, PasswordField, TextField } from "../../components/ui";
+import { ServiceAreaFields, emptyServiceArea, serviceAreaError } from "../../components/ServiceAreaFields";
+import { AuthStage, useStage } from "./AuthStage";
+import { CodeSignIn, MethodTabs, SocialSignIn, type Method } from "./SignInMethods";
+import { greeting } from "./stageBus";
 
 type Mode = "signin" | "register" | "forgot" | "reset" | "verify" | "invite";
-
-function Shell({ title, subtitle, children }: { title: string; subtitle?: ReactNode; children: ReactNode }) {
-  useTitle(title, { noindex: true });
-  return (
-    <div className="app">
-      <a className="skip-link" href="#main">
-        Skip to content
-      </a>
-      <div className="auth-shell">
-        <div className="auth-art" style={{ backgroundImage: "url(/products/jordan_bg_hd.png)" }} aria-hidden="true">
-          <Link to="/" className="wordmark" style={{ color: "#fff" }} tabIndex={-1}>
-            CrownCart
-          </Link>
-          <div>
-            <div className="display" style={{ color: "#fff" }}>
-              Beyond Ordinary.
-            </div>
-            <p style={{ opacity: 0.75, marginTop: 8 }}>Discover a world of extraordinary choices.</p>
-          </div>
-        </div>
-        <main id="main" className="auth-panel">
-          <div style={{ width: "100%", maxWidth: 400, margin: "0 auto" }} className="stack">
-            <Link to="/" className="wordmark" style={{ fontSize: 26 }}>
-              CrownCart
-            </Link>
-            <div>
-              <h1 className="h2">{title}</h1>
-              {subtitle && <p className="muted small" style={{ marginTop: 6 }}>{subtitle}</p>}
-            </div>
-            {children}
-          </div>
-        </main>
-      </div>
-    </div>
-  );
-}
 
 function FormError({ error }: { error: string | null }) {
   return error ? (
@@ -52,39 +19,46 @@ function FormError({ error }: { error: string | null }) {
   ) : null;
 }
 
-function GoogleButton({ returnTo }: { returnTo: string }) {
-  const { googleEnabled } = useAuth();
-  if (!googleEnabled) return null;
-  return (
-    <>
-      <a className="btn btn-outline btn-lg btn-block" href={`/api/auth/google/start?returnTo=${encodeURIComponent(returnTo || "/")}`}>
-        <span aria-hidden="true" style={{ fontWeight: 800 }}>
-          G
-        </span>{" "}
-        Continue with Google
-      </a>
-      <div className="row tiny muted" style={{ justifyContent: "center" }}>
-        <span>or use your email</span>
-      </div>
-    </>
-  );
+/** Shared finish for every sign-in method: celebrate on the stage, then go where the visitor was heading. */
+function useFinishLogin(fallback?: string) {
+  const [params] = useSearchParams();
+  const returnTo = safeReturnTo(params.get("returnTo"), "");
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const stage = useStage();
+  const finishing = useRef(false);
+
+  // Already signed in when the page opened: skip straight on.
+  useEffect(() => {
+    if (user && !finishing.current) navigate(landingAfterSignIn(user, returnTo), { replace: true });
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const run = async (login: () => Promise<Me>) => {
+    finishing.current = true;
+    try {
+      const u = await login();
+      await stage.celebrate();
+      // New sign-ups keep their welcome page; sign-ins open on their role's first page.
+      navigate(fallback && !returnTo ? fallback : landingAfterSignIn(u, returnTo), { replace: true });
+    } catch (e) {
+      finishing.current = false;
+      throw e;
+    }
+  };
+  return { run, returnTo, params };
 }
 
 function SignIn() {
-  const [params] = useSearchParams();
-  const returnTo = safeReturnTo(params.get("returnTo"), "");
+  const { run, returnTo, params } = useFinishLogin();
   const fromCart = params.get("reason") === "cart";
-  const { signIn, user } = useAuth();
-  const navigate = useNavigate();
+  const { signIn } = useAuth();
+  const stage = useStage();
+  const [method, setMethod] = useState<Method>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(params.get("error"));
   const [fields, setFields] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (user && !busy) navigate(returnTo || homeFor(user), { replace: true });
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -92,35 +66,43 @@ function SignIn() {
     setError(null);
     setFields({});
     try {
-      const u = await signIn(email, password);
-      navigate(returnTo || homeFor(u), { replace: true });
+      await run(() => signIn(email, password));
     } catch (err) {
       setError(errorMessage(err));
       if (err instanceof ApiError) setFields(err.fields);
       setBusy(false);
+      stage.fail();
     }
   };
 
   const qs = params.toString() ? `?${params.toString()}` : "";
   return (
-    <Shell title="Sign in" subtitle={fromCart ? "Sign in or create an account to add this item to your bag. We'll add it as soon as you're in." : "Welcome back to CrownCart."}>
-      <GoogleButton returnTo={returnTo} />
-      <form className="stack" onSubmit={submit} noValidate>
-        <FormError error={error} />
-        <TextField label="Email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} error={fields.email} />
-        <PasswordField label="Password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} error={fields.password} />
-        <div className="spread small">
-          <span />
-          <Link to="/forgot-password">Forgot password?</Link>
-        </div>
-        <Button className="btn-lg btn-block" loading={busy} type="submit">
-          Sign in
-        </Button>
-      </form>
-      <p className="small muted" style={{ textAlign: "center" }}>
+    <AuthStage title="Sign in" subtitle={fromCart ? "Sign in or create an account to add this item to your bag. We'll add it as soon as you're in." : `${greeting()}. Welcome back to CrownCart.`}>
+      <SocialSignIn returnTo={returnTo} run={run} onError={setError} />
+      <MethodTabs value={method} onChange={(m) => (setMethod(m), setError(null))} />
+      {method === "password" ? (
+        <form className="stack" onSubmit={submit} noValidate>
+          <FormError error={error} />
+          <TextField label="Email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} error={fields.email} />
+          <PasswordField label="Password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} error={fields.password} />
+          <div className="spread small">
+            <span />
+            <Link to="/forgot-password">Forgot password?</Link>
+          </div>
+          <Button className="btn-lg btn-block" loading={busy} type="submit">
+            Sign in
+          </Button>
+        </form>
+      ) : (
+        <>
+          {error && <FormError error={error} />}
+          <CodeSignIn key={method} channel={method} run={run} />
+        </>
+      )}
+      <p className="small muted" style={{ textAlign: "center", margin: 0 }}>
         New to CrownCart? <Link to={`/register${qs}`}>Create an account</Link>
       </p>
-    </Shell>
+    </AuthStage>
   );
 }
 
@@ -128,7 +110,8 @@ function Register() {
   const [params] = useSearchParams();
   const returnTo = safeReturnTo(params.get("returnTo"), "");
   const { register } = useAuth();
-  const navigate = useNavigate();
+  const { run } = useFinishLogin("/account?welcome=1");
+  const stage = useStage();
   const [form, setForm] = useState({ name: "", email: "", password: "", acceptTerms: false, marketingOptIn: false });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -144,7 +127,7 @@ function Register() {
     if (form.password.length < 10) local.password = "Use at least 10 characters.";
     if (!form.acceptTerms) local.acceptTerms = "Please accept the terms to continue.";
     setFields(local);
-    if (Object.keys(local).length) return;
+    if (Object.keys(local).length) return stage.fail();
     setBusy(true);
     setError(null);
     try {
@@ -154,19 +137,19 @@ function Register() {
       } catch {
         /* ignore */
       }
-      await register({ ...form, referralCode });
-      navigate(returnTo || "/account?welcome=1", { replace: true });
+      await run(() => register({ ...form, referralCode }));
     } catch (err) {
       setError(errorMessage(err));
       if (err instanceof ApiError) setFields(err.fields);
       setBusy(false);
+      stage.fail();
     }
   };
 
   const qs = params.toString() ? `?${params.toString()}` : "";
   return (
-    <Shell title="Create your account" subtitle="Save your bag across devices, track orders and check out faster.">
-      <GoogleButton returnTo={returnTo} />
+    <AuthStage title="Create account" subtitle="Save your bag across devices, track orders and check out faster.">
+      <SocialSignIn returnTo={returnTo} />
       <form className="stack" onSubmit={submit} noValidate>
         <FormError error={error} />
         <TextField label="Full name" autoComplete="name" required value={form.name} onChange={set("name")} error={fields.name} />
@@ -199,7 +182,7 @@ function Register() {
       <p className="small muted" style={{ textAlign: "center" }}>
         Already have an account? <Link to={`/signin${qs}`}>Sign in</Link>
       </p>
-    </Shell>
+    </AuthStage>
   );
 }
 
@@ -209,7 +192,7 @@ function Forgot() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
-    <Shell title="Reset your password" subtitle="Enter your account email and we'll send you a reset link.">
+    <AuthStage title="Reset your password" subtitle="Enter your account email and we'll send you a reset link.">
       {sent ? (
         <div className="alert alert-success" role="status">
           If an account exists for {email}, a reset link is on its way. The link expires in 30 minutes.
@@ -241,7 +224,7 @@ function Forgot() {
       <Link to="/signin" className="small">
         ← Back to sign in
       </Link>
-    </Shell>
+    </AuthStage>
   );
 }
 
@@ -253,7 +236,7 @@ function Reset() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
-    <Shell title="Choose a new password">
+    <AuthStage title="Choose a new password">
       {done ? (
         <>
           <div className="alert alert-success" role="status">
@@ -292,7 +275,7 @@ function Reset() {
       <Link to="/forgot-password" className="small">
         Request a new link
       </Link>
-    </Shell>
+    </AuthStage>
   );
 }
 
@@ -310,7 +293,7 @@ function Verify() {
       .catch((e) => (setState("error"), setError(errorMessage(e))));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <Shell title="Email verification">
+    <AuthStage title="Email verification">
       {state === "working" && <p className="muted">Verifying…</p>}
       {state === "done" && (
         <>
@@ -330,7 +313,22 @@ function Verify() {
           )}
         </>
       )}
-    </Shell>
+    </AuthStage>
+  );
+}
+
+/** Where a joining delivery partner works; used for nearby auto-assignment. */
+function PartnerArea({ area, setArea }: { area: typeof emptyServiceArea; setArea: (a: typeof emptyServiceArea) => void }) {
+  return (
+    <fieldset className="stack" style={{ border: 0, padding: 0, margin: "6px 0 0" }}>
+      <legend className="h3" style={{ marginBottom: 4 }}>
+        Where you deliver
+      </legend>
+      <p className="tiny muted" style={{ marginTop: 0 }}>
+        Orders going to these PIN codes are sent to you automatically.
+      </p>
+      <ServiceAreaFields value={area} onChange={setArea} />
+    </fieldset>
   );
 }
 
@@ -341,19 +339,26 @@ function Invite() {
   const [info, setInfo] = useState<{ email: string; role: string; memberRole: string | null; storeName: string | null; existingAccount: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", password: "" });
+  const [area, setArea] = useState(emptyServiceArea);
   const [busy, setBusy] = useState(false);
+  const isPartner = info?.role === "delivery_partner";
   useEffect(() => {
     api.get<typeof info>(`/auth/invitations/${encodeURIComponent(token)}`).then(setInfo).catch((e) => setError(errorMessage(e)));
   }, [token]);
   const roleName = info ? (info.memberRole && info.memberRole !== "owner" ? info.memberRole.replace(/_/g, " ") : info.role.replace(/_/g, " ")) : "";
   const accept = async (e?: FormEvent) => {
     e?.preventDefault();
+    const areaErr = isPartner ? serviceAreaError(area) : null;
+    if (areaErr) return setError(areaErr);
     setBusy(true);
     setError(null);
     try {
-      await api.post(`/auth/invitations/${encodeURIComponent(token)}/accept`, info?.existingAccount ? {} : form);
+      await api.post(`/auth/invitations/${encodeURIComponent(token)}/accept`, {
+        ...(info?.existingAccount ? {} : form),
+        ...(isPartner ? { serviceArea: { city: area.city.trim(), state: area.state, pincodes: area.pincodes } } : {}),
+      });
       await refresh();
-      navigate("/account", { replace: true });
+      navigate(isPartner ? "/delivery" : "/account", { replace: true });
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -361,14 +366,17 @@ function Invite() {
     }
   };
   return (
-    <Shell title="Accept invitation" subtitle={info ? `You've been invited to join CrownCart as ${roleName}${info.storeName ? ` for ${info.storeName}` : ""}.` : undefined}>
+    <AuthStage title="Accept invitation" subtitle={info ? `You've been invited to join CrownCart as ${roleName}${info.storeName ? ` for ${info.storeName}` : ""}.` : undefined}>
       <FormError error={error} />
       {info &&
         (info.existingAccount ? (
           user?.email === info.email ? (
-            <Button className="btn-lg btn-block" loading={busy} onClick={() => accept()}>
-              Accept as {info.email}
-            </Button>
+            <form className="stack" onSubmit={accept}>
+              {isPartner && <PartnerArea area={area} setArea={setArea} />}
+              <Button className="btn-lg btn-block" loading={busy} type="submit">
+                Accept as {info.email}
+              </Button>
+            </form>
           ) : (
             <Link className="btn btn-block" to={`/signin?returnTo=${encodeURIComponent(`/invite/${token}`)}`}>
               Sign in as {info.email} to accept
@@ -379,12 +387,13 @@ function Invite() {
             <TextField label="Email" value={info.email} disabled readOnly />
             <TextField label="Full name" autoComplete="name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <PasswordField label="Password" autoComplete="new-password" required showStrength value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            {isPartner && <PartnerArea area={area} setArea={setArea} />}
             <Button className="btn-lg btn-block" loading={busy} type="submit">
               Create account & accept
             </Button>
           </form>
         ))}
-    </Shell>
+    </AuthStage>
   );
 }
 

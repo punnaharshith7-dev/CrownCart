@@ -271,7 +271,7 @@ function VariantModal({ storeId, productId, v, onClose, onSaved }: { storeId: nu
           <TextField label="Size" value={f.size} onChange={set("size")} />
           <TextField label="Colour" value={f.color} onChange={set("color")} />
           <TextField label="Price (₹)" required inputMode="decimal" value={f.price} onChange={set("price")} />
-          <TextField label="Compare-at price (₹)" inputMode="decimal" value={f.compareAt} onChange={set("compareAt")} hint="Shows a strikethrough price. Must be higher than the price." />
+          <TextField label="Original price (₹)" inputMode="decimal" value={f.compareAt} onChange={set("compareAt")} hint="Optional. Customers see it crossed out with the % off. Must be higher than the price." />
           <TextField label="Max per order" type="number" min={1} max={50} value={f.maxPerOrder} onChange={set("maxPerOrder")} />
           <TextField label="Low-stock alert at" type="number" min={0} value={f.lowStockThreshold} onChange={set("lowStockThreshold")} />
           {!v && <TextField label="Opening stock" type="number" min={0} value={f.stock} onChange={set("stock")} />}

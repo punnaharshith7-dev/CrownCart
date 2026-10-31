@@ -100,7 +100,7 @@ const SECTIONS: { key: string; label: string; settingKeys: string[] }[] = [
   { key: "payments", label: "Payments & checkout", settingKeys: ["cod", "checkout"] },
   { key: "tax", label: "Tax", settingKeys: ["tax"] },
   { key: "delivery", label: "Delivery", settingKeys: ["delivery"] },
-  { key: "returns", label: "Returns & reviews", settingKeys: ["returns", "reviews"] },
+  { key: "returns", label: "Returns", settingKeys: ["returns"] },
   { key: "rewards", label: "Loyalty & referrals", settingKeys: ["loyalty", "referrals", "giftCards"] },
   { key: "messaging", label: "SMS & WhatsApp", settingKeys: ["messaging"] },
   { key: "courier", label: "Courier", settingKeys: ["courier"] },
@@ -183,7 +183,7 @@ export function SettingsPages() {
             <TextField label="Support email" type="email" {...text("brand", "supportEmail")} />
             <TextField label="Support phone" {...text("brand", "supportPhone")} />
           </div>
-          <p className="tiny muted">The logo and favicon are part of the site build; replacing them is a code change for now.</p>
+          <p className="tiny muted">The logo and favicon are part of the site build (public/brand); replacing them is a code change for now.</p>
         </Section>
       );
       break;
@@ -260,15 +260,20 @@ export function SettingsPages() {
       body = (
         <Section title="Delivery" {...common}>
           {flag("delivery", "requireOtp", "Require the customer's 6-digit delivery code to complete a delivery", "Recommended. Without it, partners can complete deliveries with just the recipient's name.")}
+          {flag("delivery", "requirePhoto", "Require a doorstep photo to complete a delivery", "Recommended. The partner photographs the parcel at handover; the customer, store and admins see it on the order. Return pickups always need an item photo.")}
+          {flag(
+            "delivery",
+            "autoAssign",
+            "Auto-assign orders to the nearest delivery partner",
+            "When an order is marked ready for dispatch, it goes to an available partner whose service area (PIN code prefixes) covers the delivery PIN code. The most specific area match wins, then whoever has the fewest open deliveries. If nobody covers the area, the store is notified to assign manually.",
+          )}
         </Section>
       );
       break;
     case "returns":
       body = (
-        <Section title="Returns & reviews" description="Each product also has its own return window, set by the store." {...common}>
+        <Section title="Returns" description="Each product also has its own return window, set by the store." {...common}>
           {flag("returns", "enabled", "Allow customers to request returns and exchanges")}
-          {flag("reviews", "requireModeration", "Hold new reviews for moderation before publishing")}
-          {flag("reviews", "verifiedPurchaseOnly", "Only customers who received the product can review it")}
         </Section>
       );
       break;

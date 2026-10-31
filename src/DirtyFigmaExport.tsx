@@ -1,19 +1,72 @@
 import { useState, useEffect, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import { homeFor, useAuth } from "./lib/auth";
+import { homepageWordmarkStyle } from "./lib/brandStyles";
+import { BounceHeading } from "./components/BounceHeading";
+import { pageScrollBehavior } from "./lib/scroll";
 
 /** Smooth-scrolls to a homepage section, or navigates when it lives on another page. */
 function goToSection(navigate: (to: string) => void, key: string) {
-  const ids: Record<string, string> = { home: "hero", explore: "product-shoe", why: "why-crowncart", story: "our-story" };
-  if (key === "home") return window.scrollTo({ top: 0, behavior: "smooth" });
-  if (key === "collections") return navigate("/shop");
+  const ids: Record<string, string> = { home: "hero", explore: "explore", why: "why-crowncart", story: "our-story" };
+  if (key === "home") return navigate("/shop");
+  if (key === "collections") return navigate("/collections");
+  if (key === "explore") return navigate("/explore");
+  if (key === "shop") return navigate("/shop");
   if (key === "contact") return navigate("/contact");
-  document.getElementById(ids[key] ?? key)?.scrollIntoView({ behavior: "smooth" });
+  document.getElementById(ids[key] ?? key)?.scrollIntoView({ behavior: pageScrollBehavior() });
+}
+
+/** Photo for each directory tile; unknown sections cycle through the set. */
+const TILE_IMAGES: Record<string, { src: string; position: string }> = {
+  home: { src: "/products/jordan_patent.jpg", position: "70% 40%" },
+  explore: { src: "/products/nautilus_raw.jpg", position: "68% 50%" },
+  collections: { src: "/products/ax_bomber_raw.jpg", position: "72% 45%" },
+  why: { src: "/products/asus_tuf_bg.jpg", position: "70% 45%" },
+  story: { src: "/products/nautilus_raw.jpg", position: "20% 30%" },
+  contact: { src: "/products/ax_bomber_raw.jpg", position: "15% 60%" },
+  shop: { src: "/products/asus_tuf_bg.jpg", position: "25% 70%" },
+  reviews: { src: "/products/jordan_patent.jpg", position: "45% 70%" },
+};
+const TILE_FALLBACK = Object.values(TILE_IMAGES);
+
+/** Feeds the cursor position to CSS so hover fills and spotlights start where the pointer is. */
+function trackPointer(e: React.PointerEvent<HTMLElement>) {
+  const r = e.currentTarget.getBoundingClientRect();
+  e.currentTarget.style.setProperty("--mx", `${e.clientX - r.left}px`);
+  e.currentTarget.style.setProperty("--my", `${e.clientY - r.top}px`);
+}
+
+/** Tilts a directory tile toward the cursor. */
+function tiltTile(e: React.PointerEvent<HTMLElement>) {
+  if (e.pointerType !== "mouse") return;
+  trackPointer(e);
+  const r = e.currentTarget.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width - 0.5;
+  const y = (e.clientY - r.top) / r.height - 0.5;
+  e.currentTarget.style.setProperty("--tx", `${x * 10}deg`);
+  e.currentTarget.style.setProperty("--ty", `${-y * 10}deg`);
+}
+
+function resetTile(e: React.PointerEvent<HTMLElement>) {
+  e.currentTarget.style.setProperty("--tx", "0deg");
+  e.currentTarget.style.setProperty("--ty", "0deg");
+}
+
+/** Drops a ripple at the press point. */
+function spawnRipple(e: React.PointerEvent<HTMLElement>) {
+  const el = e.currentTarget;
+  const r = el.getBoundingClientRect();
+  const ripple = document.createElement("span");
+  ripple.className = "home-ripple";
+  ripple.style.left = `${e.clientX - r.left}px`;
+  ripple.style.top = `${e.clientY - r.top}px`;
+  ripple.addEventListener("animationend", () => ripple.remove());
+  el.appendChild(ripple);
 }
 
 export function Underlay() {
   const [isOpen, setIsOpen] = useState(false);
-  const { user, cartCount } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [sections, setSections] = useState<{ key: string; number: string; label: string; description: string; visible: boolean }[]>([]);
 
@@ -37,6 +90,7 @@ export function Underlay() {
 
   return (
     <div
+      className="home-overlay"
       style={{
         position: "absolute",
         top: 0,
@@ -53,6 +107,7 @@ export function Underlay() {
       }}
     >
       <div
+        className="home-topbar"
         style={{
           width: "100%",
           padding: 0,
@@ -64,23 +119,20 @@ export function Underlay() {
           zIndex: 60,
         }}
       >
-        <p
+        <BounceHeading
+          as="p"
+          className="home-wordmark"
           style={{
-            fontFamily: "'Antonio', sans-serif",
-            height: 44,
-            fontSize: 44,
-            fontWeight: "700",
-            lineHeight: "44px",
+            ...homepageWordmarkStyle,
             color: "black",
-            letterSpacing: -2,
-            margin: 0,
           }}
         >
           CrownCart
-        </p>
+        </BounceHeading>
 
-        {/* Top-Right Navigation & Action Buttons */}
+        {/* Centered Navigation & Action Buttons */}
         <div
+          className="home-controls"
           style={{
             position: "relative",
             pointerEvents: "all",
@@ -92,270 +144,90 @@ export function Underlay() {
         >
           {/* Discover Button */}
           <button
+            className={`home-control-button${isOpen ? " is-open" : ""}`}
             type="button"
             onClick={() => setIsOpen(!isOpen)}
+            onPointerMove={trackPointer}
+            onPointerEnter={trackPointer}
+            onPointerDown={spawnRipple}
             aria-expanded={isOpen}
             aria-controls="home-directory"
-            style={{
-              pointerEvents: "all",
-              cursor: "pointer",
-              fontFamily: "'Inter', -apple-system, sans-serif",
-              fontSize: 12,
-              fontWeight: 600,
-              letterSpacing: 1.2,
-              textTransform: "uppercase",
-              padding: "9px 20px",
-              backgroundColor: isOpen ? "#111111" : "transparent",
-              color: isOpen ? "#ffffff" : "#111111",
-              border: "1.5px solid #111111",
-              borderRadius: "24px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "8px",
-              transition: "all 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
-              outline: "none",
-              boxShadow: isOpen ? "0 4px 14px rgba(0,0,0,0.12)" : "none",
-              minWidth: "128px",
-            }}
-            onMouseEnter={(e) => {
-              if (!isOpen) {
-                e.currentTarget.style.backgroundColor = "#111111";
-                e.currentTarget.style.color = "#ffffff";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isOpen) {
-                e.currentTarget.style.backgroundColor = "transparent";
-                e.currentTarget.style.color = "#111111";
-              }
-            }}
           >
             <span>{isOpen ? "Close" : "Discover"}</span>
-            <span style={{ fontSize: 13, lineHeight: 1 }}>{isOpen ? "✕" : "▾"}</span>
+            <span className="home-control-icon" aria-hidden="true" />
           </button>
 
           {/* Sign In Button Directly Below Discover */}
           <button
+            className="home-control-button"
             type="button"
             onClick={() => navigate(user ? homeFor(user) : "/signin?returnTo=%2F")}
-            style={{
-              pointerEvents: "all",
-              cursor: "pointer",
-              fontFamily: "'Inter', -apple-system, sans-serif",
-              fontSize: 12,
-              fontWeight: 600,
-              letterSpacing: 1.2,
-              textTransform: "uppercase",
-              padding: "9px 20px",
-              backgroundColor: "transparent",
-              color: "#111111",
-              border: "1.5px solid #111111",
-              borderRadius: "24px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "8px",
-              transition: "all 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
-              outline: "none",
-              minWidth: "128px",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = "#111111";
-              e.currentTarget.style.color = "#ffffff";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = "transparent";
-              e.currentTarget.style.color = "#111111";
-            }}
+            onPointerMove={trackPointer}
+            onPointerEnter={trackPointer}
+            onPointerDown={spawnRipple}
           >
             <span>{user ? "My Account" : "Sign In"}</span>
+            <span className="home-control-arrow" aria-hidden="true">&rarr;</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => navigate("/cart")}
-            aria-label={`Bag, ${cartCount} item${cartCount === 1 ? "" : "s"}`}
-            style={{
-              pointerEvents: "all",
-              cursor: "pointer",
-              fontFamily: "'Inter', -apple-system, sans-serif",
-              fontSize: 12,
-              fontWeight: 600,
-              letterSpacing: 1.2,
-              textTransform: "uppercase",
-              padding: "9px 20px",
-              backgroundColor: "transparent",
-              color: "#111111",
-              border: "1.5px solid #111111",
-              borderRadius: "24px",
-              minWidth: "128px",
-            }}
-          >
-            Bag{cartCount > 0 ? ` (${cartCount})` : ""}
-          </button>
-
-          {/* Expandable Sections Panel directly under that button */}
+          {/* Expandable Sections Panel beneath the centered controls */}
           {isOpen && (
-            <div
-              className="no-scrollbar"
-              id="home-directory"
-              role="navigation"
-              aria-label="Site sections"
-              style={{
-                position: "absolute",
-                top: "calc(100% + 14px)",
-                right: 0,
-                width: 360,
-                maxHeight: "calc(100vh - 120px)",
-                overflowY: "auto",
-                backgroundColor: "rgba(255, 255, 255, 0.96)",
-                backdropFilter: "blur(24px)",
-                WebkitBackdropFilter: "blur(24px)",
-                border: "1px solid rgba(0, 0, 0, 0.08)",
-                borderRadius: 18,
-                padding: "24px",
-                boxShadow: "0 24px 60px rgba(0, 0, 0, 0.12), 0 4px 16px rgba(0, 0, 0, 0.04)",
-                pointerEvents: "all",
-                zIndex: 100,
-                display: "flex",
-                flexDirection: "column",
-                gap: "20px",
-                animation: "dropdownFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards",
-              }}
-            >
-              {/* Panel Header */}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "baseline",
-                  borderBottom: "1px solid rgba(0, 0, 0, 0.08)",
-                  paddingBottom: "12px",
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "'Antonio', sans-serif",
-                    fontSize: "14px",
-                    fontWeight: "700",
-                    letterSpacing: "1.5px",
-                    textTransform: "uppercase",
-                    color: "#111111",
-                  }}
-                >
-                  MENU & DIRECTORY
-                </span>
-                <span style={{ fontSize: "11px", color: "#888888", fontWeight: "600" }}>
-                  {String(sections.length + 2).padStart(2, "0")} SECTIONS
-                </span>
+            <div className="home-directory no-scrollbar" id="home-directory" role="navigation" aria-label="Site sections">
+              <div className="home-directory__head">
+                <div>
+                  <span className="home-directory__eyebrow">Where to next</span>
+                  <span className="home-directory__title">Menu &amp; Directory</span>
+                </div>
+                <span className="home-directory__count">{String(sections.length + 2).padStart(2, "0")} SECTIONS</span>
               </div>
 
-              {/* Exact 7 Navigation Sections */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div className="home-directory__grid">
                 {[
-                  ...sections.map((x, i) => ({ id: String(i + 1).padStart(2, "0"), key: x.key, title: x.label, desc: x.description })),
-                  { id: String(sections.length + 1).padStart(2, "0"), key: "shop", title: "Shop All", desc: "Search, filter and browse every product" },
-                  { id: String(sections.length + 2).padStart(2, "0"), key: "reviews", title: "Reviews", desc: "What customers say" },
-                ].map((item) => (
+                  ...sections.map((x) => ({ key: x.key, title: x.label, desc: x.key === "explore" ? "Every brand in the house" : x.description })),
+                  { key: "shop", title: "Shop All", desc: "Search, filter and browse every product" },
+                  { key: "reviews", title: "Reviews", desc: "What customers say" },
+                ].map((item, i, all) => {
+                  const image = TILE_IMAGES[item.key] ?? TILE_FALLBACK[i % TILE_FALLBACK.length];
+                  // Featured tile fills 2x2; stretch the last tile so the final row has no gap.
+                  const leftover = (all.length - 3) % 3;
+                  const span = i === 0 ? " home-tile--featured" : i === all.length - 1 && all.length > 3 && leftover ? (leftover === 2 ? " home-tile--wide" : " home-tile--full") : "";
+                  return (
                   <button
                     type="button"
                     key={item.key}
-                    style={{
-                      width: "100%",
-                      border: "none",
-                      textAlign: "left",
-                      font: "inherit",
-                      color: "inherit",
-                      padding: "10px 14px",
-                      borderRadius: "12px",
-                      backgroundColor: "rgba(0, 0, 0, 0.02)",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      cursor: "pointer",
-                      transition: "all 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.07)";
-                      e.currentTarget.style.transform = "translateX(5px)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = "rgba(0, 0, 0, 0.02)";
-                      e.currentTarget.style.transform = "translateX(0)";
-                    }}
+                    className={`home-tile${span}`}
+                    style={{ "--i": i } as CSSProperties}
+                    onPointerMove={tiltTile}
+                    onPointerLeave={resetTile}
                     onClick={() => {
                       setIsOpen(false);
                       if (item.key === "reviews") window.dispatchEvent(new CustomEvent("crowncart-open-reviews"));
+                      else if (item.key === "home") navigate("/shop");
                       else if (item.key === "shop") navigate("/shop");
+                      else if (item.key === "collections") navigate("/collections");
+                      else if (item.key === "explore") navigate("/explore");
                       else goToSection(navigate, item.key);
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                      <span
-                        style={{
-                          fontSize: "11px",
-                          fontFamily: "'Antonio', sans-serif",
-                          fontWeight: "700",
-                          color: "#999999",
-                          letterSpacing: "0.5px",
-                        }}
-                      >
-                        {item.id}
-                      </span>
-                      <div>
-                        <div
-                          style={{
-                            fontFamily: "'Antonio', sans-serif",
-                            fontSize: "18px",
-                            fontWeight: "700",
-                            lineHeight: "1.1em",
-                            color: "#111111",
-                            letterSpacing: "-0.3px",
-                          }}
-                        >
-                          {item.title}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            color: "#777777",
-                            marginTop: "2px",
-                            fontWeight: "400",
-                          }}
-                        >
-                          {item.desc}
-                        </div>
-                      </div>
+                    <img className="home-tile__img" src={image.src} alt="" loading="lazy" decoding="async" style={{ objectPosition: image.position }} />
+                    <span className="home-tile__shade" aria-hidden="true" />
+                    <div className="home-tile__top">
+                      {i === 0 && <span className="home-tile__tag">Start here</span>}
+                      <span className="home-tile__arrow" aria-hidden="true">&rarr;</span>
                     </div>
-                    <span
-                      style={{
-                        fontSize: "14px",
-                        color: "#999999",
-                        fontWeight: "400",
-                        transform: "translateX(0)",
-                        transition: "transform 0.18s ease",
-                      }}
-                    >
-                      &rarr;
-                    </span>
+                    <div className="home-tile__body">
+                      <div className="home-tile__title">{item.title}</div>
+                      <div className="home-tile__desc">{item.desc}</div>
+                      <span className="home-tile__line" aria-hidden="true" />
+                    </div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
 
-              {/* Panel Footer */}
-              <div
-                style={{
-                  paddingTop: "12px",
-                  borderTop: "1px solid rgba(0, 0, 0, 0.08)",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  fontSize: "11px",
-                  color: "#888888",
-                }}
-              >
+              <div className="home-directory__foot">
                 <span>CrownCart Luxury Collective</span>
+                <span className="home-directory__hint"><kbd>Esc</kbd> to close</span>
                 <span>© 2026</span>
               </div>
             </div>
@@ -363,8 +235,9 @@ export function Underlay() {
         </div>
 
       </div>
-      <div style={{ height: 60 }} />
+      <div className="home-spacer" style={{ height: 60 }} />
       <div
+        className="home-meta-row"
         style={{
           width: "100%",
           padding: 0,
@@ -389,25 +262,10 @@ export function Underlay() {
           <br />
           <b>—</b>
         </p>
-        <div style={{ width: 10 }} />
-        <p
-          style={{
-            transform: "rotate3d(0, 0, 1, 90deg) translate3d(100%,10px,0)",
-            transformOrigin: "right",
-            fontSize: 12,
-            fontWeight: "700",
-            lineHeight: "100%",
-            textAlign: "right",
-            color: "black",
-            whiteSpace: "nowrap",
-          }}
-        >
-          ESTABLISHED IN 2026 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ●
-        </p>
       </div>
-      <div style={{ height: 10 }} />
+      <div className="home-spacer" style={{ height: 10 }} />
       <div
-        className="full"
+        className="home-huge-type full"
         style={{
           fontFamily: "'Antonio', sans-serif",
           width: "100%",
@@ -419,7 +277,8 @@ export function Underlay() {
           justifyContent: "center",
         }}
       >
-        <p
+        <BounceHeading
+          as="p"
           style={{
             fontFamily: "'Antonio', sans-serif",
             flex: "1 1 0%",
@@ -431,25 +290,27 @@ export function Underlay() {
           }}
         >
           C
-        </p>
+        </BounceHeading>
         <div style={{ width: 10 }} />
-        <p
+        <BounceHeading
+          as="p"
+          align="end"
           style={{
             fontFamily: "'Antonio', sans-serif",
             flex: "1 1 0%",
             fontSize: 250,
             lineHeight: "100%",
-            textAlign: "right",
             color: "black",
             margin: 0,
             letterSpacing: -10,
           }}
         >
           #1
-        </p>
+        </BounceHeading>
       </div>
-      <div style={{ height: 60 }} />
+      <div className="home-spacer" style={{ height: 60 }} />
       <div
+        className="home-bottom-bar"
         style={
           {
             pointerEvents: "all",
@@ -472,9 +333,6 @@ export function Underlay() {
             color: "black",
           }}
         >
-          <b>The Art of Discovery</b>
-          <br />
-          Fashion, technology & lifestyle
         </p>
         <div style={{ width: 10 }} />
         <div
@@ -489,23 +347,42 @@ export function Underlay() {
             pointerEvents: "all",
           }}
         >
-          <p
+          <BounceHeading
+            as="p"
+            align="center"
             style={{
               fontFamily: "'Antonio', sans-serif",
               fontSize: 16,
               fontWeight: "700",
               lineHeight: "1em",
-              textAlign: "center",
               color: "black",
               letterSpacing: -0.5,
               whiteSpace: "nowrap",
+              flexWrap: "nowrap",
               textTransform: "uppercase",
             }}
           >
             The Crown of Discovery
+          </BounceHeading>
+          <p
+            className="home-hero-sells"
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              letterSpacing: "0.12em",
+              lineHeight: "1.3em",
+              textAlign: "center",
+              textTransform: "uppercase",
+              color: "#111111",
+              maxWidth: "calc(100vw - 32px)",
+              margin: "0 0 4px",
+            }}
+          >
+            Fashion · Footwear · Timepieces · Tech
           </p>
           <button
             type="button"
+            data-magnetic
             style={{
               pointerEvents: "all",
               cursor: "pointer",
@@ -539,11 +416,11 @@ export function Underlay() {
             onClick={() => {
               const el = document.getElementById("product-shoe");
               if (el) {
-                el.scrollIntoView({ behavior: "smooth" });
+                el.scrollIntoView({ behavior: pageScrollBehavior() });
               }
             }}
           >
-            <span>EXPLORE</span>
+            <span>TRENDING NOW</span>
             <span style={{ fontSize: "12px", transform: "translateY(1px)" }}>↓</span>
           </button>
         </div>
@@ -559,26 +436,6 @@ export function Underlay() {
           }}
         ></p>
       </div>
-    </div>
-  );
-}
-
-export function Overlay() {
-  return (
-    <div style={{ position: "absolute", bottom: 40, right: 40, pointerEvents: "all" }}>
-      <p
-        style={{
-          flex: "1 1 0%",
-          fontSize: 12,
-          lineHeight: "1em",
-          textAlign: "right",
-          color: "black",
-        }}
-      >
-        <span style={{ fontWeight: 600, letterSpacing: "0.2px", color: "black" }}>
-          A world of extraordinary choices
-        </span>
-      </p>
     </div>
   );
 }

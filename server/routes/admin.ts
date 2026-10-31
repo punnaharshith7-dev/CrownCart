@@ -6,11 +6,12 @@ import { badRequest, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { body, email, id, pincode } from "../lib/validate.ts";
 import { requireAdmin, requireUser, revokeUserSessions } from "../lib/auth.ts";
 import { audit } from "../lib/audit.ts";
+import { reviewPhotos } from "../lib/reviews.ts";
 import { notify, sendEmail } from "../lib/notify.ts";
 import { parseRange, reportData, salesMetrics, toCsv } from "../lib/analytics.ts";
 import { ORDER_STATUS_LABELS, DELIVERY_STATUS_LABELS, transitionOrder } from "../lib/orders.ts";
 import { cancelAndRefund, markRefundProcessed, startRefund } from "../lib/payments.ts";
-import { approvedPartners, assignPartner, createShipment } from "../lib/fulfilment.ts";
+import { approvedPartners, assignPartner, autoAssignShipment, autoAssignWaitingFor, createShipment } from "../lib/fulfilment.ts";
 import { allSettings, setSetting, SETTING_DEFAULTS, type SettingKey } from "../lib/settings.ts";
 import { randomToken, sha256 } from "../lib/crypto.ts";
 import { ROLES, type RoleKey } from "../lib/permissions.ts";
@@ -50,9 +51,8 @@ const settingSchemas: Record<SettingKey, z.ZodTypeAny> = {
   cod: z.object({ enabled: z.boolean(), maxOrderPaise: z.number().int().min(0) }),
   checkout: z.object({ requireVerifiedEmail: z.boolean(), paymentWindowMinutes: z.number().int().min(5).max(240) }),
   tax: z.object({ mode: z.literal("inclusive"), note: z.string().trim().max(200) }),
-  delivery: z.object({ requireOtp: z.boolean() }),
+  delivery: z.object({ requireOtp: z.boolean(), autoAssign: z.boolean(), requirePhoto: z.boolean().default(true) }),
   returns: z.object({ enabled: z.boolean() }),
-  reviews: z.object({ requireModeration: z.boolean(), verifiedPurchaseOnly: z.boolean() }),
   maintenance: z.object({ enabled: z.boolean(), message: z.string().trim().max(300) }),
   features: z.object({ wishlist: z.boolean(), reviews: z.boolean(), coupons: z.boolean(), assistant: z.boolean(), viewer3d: z.boolean() }),
   loyalty: z.object({ enabled: z.boolean(), pointsPerHundredRupees: z.number().int().min(0).max(100), pointValuePaise: z.number().int().min(1).max(10_000), maxRedeemPercent: z.number().int().min(0).max(100) }),
@@ -113,7 +113,6 @@ export const adminRoutes = new Hono<AppEnv>()
         awaitingAssignment: n("SELECT COUNT(*) n FROM shipments WHERE status = 'awaiting_assignment'"),
         pendingPartners: n("SELECT COUNT(*) n FROM delivery_partners WHERE status = 'pending'"),
         lowStock: n("SELECT COUNT(*) n FROM inventory i JOIN product_variants v ON v.id = i.variant_id JOIN products p ON p.id = v.product_id WHERE p.status = 'active' AND i.on_hand - i.reserved <= i.low_stock_threshold"),
-        pendingReviews: n("SELECT COUNT(*) n FROM reviews WHERE status = 'pending'"),
         openTickets: n("SELECT COUNT(*) n FROM support_tickets WHERE status IN ('open','pending')"),
       },
       funnel,
@@ -239,7 +238,8 @@ export const adminRoutes = new Hono<AppEnv>()
     requireAdmin(c, "admin.roles");
     return c.json({
       invitations: c.get("db").all(
-        `SELECT i.id, i.email, i.role_key, i.member_role, i.expires_at, i.accepted_at, i.revoked_at, i.created_at, s.name AS store_name, u.name AS invited_by
+        `SELECT i.id, i.email, i.role_key, i.member_role, i.expires_at, i.accepted_at, i.revoked_at, i.created_at, u.name AS invited_by,
+                COALESCE((SELECT group_concat(x.name, ', ') FROM invitation_stores m JOIN stores x ON x.id = m.store_id WHERE m.invitation_id = i.id), s.name) AS store_name
            FROM invitations i LEFT JOIN stores s ON s.id = i.store_id JOIN users u ON u.id = i.invited_by ORDER BY i.id DESC LIMIT 100`,
       ),
     });
@@ -247,27 +247,36 @@ export const adminRoutes = new Hono<AppEnv>()
 
   .post("/invitations", async (c) => {
     const admin = requireAdmin(c, "admin.roles");
-    const input = await body(c, z.object({ email, role: z.enum(["platform_admin", "store_owner", "delivery_partner"]), storeId: id.optional().nullable() }));
+    const input = await body(
+      c,
+      z.object({ email, role: z.enum(["platform_admin", "store_owner", "delivery_partner"]), storeId: id.optional().nullable(), storeIds: z.array(id).max(50).optional() }),
+    );
     const db = c.get("db");
-    if (input.role === "store_owner") {
-      if (!input.storeId) throw badRequest("Choose the store this owner will manage.");
-      if (!db.get("SELECT 1 FROM stores WHERE id = ?", [input.storeId])) throw notFound("Store not found.");
-    }
+    // A store owner can be invited to one or more stores at once.
+    const storeIds = input.role === "store_owner" ? [...new Set([...(input.storeIds ?? []), ...(input.storeId ? [input.storeId] : [])])] : [];
+    const stores = storeIds.map((sid) => {
+      const s = db.get<{ id: number; name: string }>("SELECT id, name FROM stores WHERE id = ?", [sid]);
+      if (!s) throw notFound("Store not found.");
+      return s;
+    });
+    if (input.role === "store_owner" && !stores.length) throw badRequest("Choose at least one store this owner will manage.");
     const token = randomToken();
     db.tx(() => {
-      db.run("INSERT INTO invitations (email, role_key, store_id, member_role, token_hash, invited_by, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)", [
+      const invitationId = db.run("INSERT INTO invitations (email, role_key, store_id, member_role, token_hash, invited_by, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)", [
         input.email,
         input.role,
-        input.role === "store_owner" ? (input.storeId ?? null) : null,
-        input.role === "store_owner" ? "owner" : null,
+        stores[0]?.id ?? null,
+        stores.length ? "owner" : null,
         sha256(token),
         admin.id,
         new Date(Date.now() + 3 * 86_400_000).toISOString(),
-      ]);
-      sendEmail(db, input.email, "You're invited to CrownCart", `You've been invited to join CrownCart as ${ROLES[input.role].name}.\n\nAccept: ${config.publicUrl}/invite/${token}\n\nThis link expires in 3 days.`);
-      audit(db, { actorId: admin.id, action: "role.invited", entityType: "invitation", entityId: input.email, storeId: input.storeId ?? null, details: { role: input.role }, ip: c.get("ip") });
+      ]).lastId;
+      for (const s of stores) db.run("INSERT INTO invitation_stores (invitation_id, store_id) VALUES (?, ?)", [invitationId, s.id]);
+      const forStores = stores.length ? ` for ${stores.map((s) => s.name).join(", ")}` : "";
+      sendEmail(db, input.email, "You're invited to CrownCart", `You've been invited to join CrownCart as ${ROLES[input.role].name}${forStores}.\n\nAccept: ${config.publicUrl}/invite/${token}\n\nThis link expires in 3 days.`);
+      audit(db, { actorId: admin.id, action: "role.invited", entityType: "invitation", entityId: input.email, storeId: stores[0]?.id ?? null, details: { role: input.role, storeIds: stores.map((s) => s.id) }, ip: c.get("ip") });
     });
-    return c.json({ ok: true, ...(config.isProd ? {} : { devInviteUrl: `/invite/${token}` }) }, 201);
+    return c.json({ ok: true, ...(config.isProd || integrations().email ? {} : { devInviteUrl: `/invite/${token}` }) }, 201);
   })
 
   .delete("/invitations/:id", (c) => {
@@ -352,7 +361,7 @@ export const adminRoutes = new Hono<AppEnv>()
     requireAdmin(c, "admin.catalog");
     const q = (c.req.query("q") ?? "").trim();
     const rows = c.get("db").all(
-      `SELECT p.id, p.slug, p.name, p.status, p.is_featured, p.showcase_order, p.updated_at, s.name AS store, b.name AS brand,
+      `SELECT p.id, p.store_id, p.slug, p.name, p.status, p.is_featured, p.showcase_order, p.updated_at, s.name AS store, b.name AS brand,
               (SELECT MIN(price_paise) FROM product_variants WHERE product_id = p.id) AS price_paise,
               (SELECT url FROM product_media m WHERE m.product_id = p.id AND m.kind IN ('image','hero') ORDER BY m.kind='image' DESC, m.sort_order LIMIT 1) AS image
          FROM products p JOIN stores s ON s.id = p.store_id LEFT JOIN brands b ON b.id = p.brand_id
@@ -360,6 +369,12 @@ export const adminRoutes = new Hono<AppEnv>()
       q ? [`%${q}%`, `%${q}%`] : [],
     );
     return c.json({ products: rows });
+  })
+
+  // Stores a catalog admin can add products to.
+  .get("/catalog/stores", (c) => {
+    requireAdmin(c, "admin.catalog");
+    return c.json({ stores: c.get("db").all("SELECT id, name, status FROM stores ORDER BY name") });
   })
 
   .patch("/products/:id", async (c) => {
@@ -536,7 +551,10 @@ export const adminRoutes = new Hono<AppEnv>()
     if (!o) throw notFound();
     db.tx(() => {
       transitionOrder(db, o.id, input.to, admin.id, input.note);
-      if (input.to === "ready_for_dispatch") createShipment(db, o.id);
+      if (input.to === "ready_for_dispatch") {
+        createShipment(db, o.id);
+        autoAssignShipment(db, o.id, null);
+      }
       audit(db, { actorId: admin.id, action: "order.admin_status", entityType: "order", entityId: o.id, storeId: o.store_id, details: { from: o.status, ...input }, ip: c.get("ip") });
     });
     return c.json({ ok: true });
@@ -546,7 +564,7 @@ export const adminRoutes = new Hono<AppEnv>()
   .get("/delivery-partners", (c) => {
     requireAdmin(c, "admin.delivery");
     const rows = c.get("db").all(
-      `SELECT u.id, u.name, u.email, u.phone, u.status AS account_status, dp.status, dp.availability, dp.service_pincodes, dp.vehicle, dp.approved_at, dp.created_at,
+      `SELECT u.id, u.name, u.email, u.phone, u.status AS account_status, dp.status, dp.availability, dp.service_pincodes, dp.city, dp.state, dp.vehicle, dp.approved_at, dp.created_at,
               (SELECT COUNT(*) FROM delivery_assignments a WHERE a.partner_user_id = u.id AND a.closed_at IS NULL) AS open_assignments,
               (SELECT COUNT(*) FROM delivery_assignments a WHERE a.partner_user_id = u.id AND a.status = 'delivered') AS delivered,
               (SELECT COUNT(*) FROM delivery_assignments a WHERE a.partner_user_id = u.id AND a.status IN ('failed','returned')) AS failed
@@ -575,6 +593,8 @@ export const adminRoutes = new Hono<AppEnv>()
       if (input.status && input.status !== p.status) {
         notify(db, target, { type: "delivery.partner_status", title: input.status === "approved" ? "You're approved to deliver with CrownCart" : `Your delivery account is ${input.status}`, body: input.reason, link: "/delivery" });
       }
+      // Approval or a new service area can unlock orders waiting for a nearby partner.
+      if (input.status === "approved" || input.servicePincodes != null) autoAssignWaitingFor(db, target);
     });
     return c.json({ ok: true });
   })
@@ -595,13 +615,16 @@ export const adminRoutes = new Hono<AppEnv>()
   // ── Reviews & support ──
   .get("/reviews", (c) => {
     requireAdmin(c, "admin.support");
-    const status = c.req.query("status") ?? "pending";
+    const status = c.req.query("status") ?? "published";
+    const db = c.get("db");
     return c.json({
-      reviews: c.get("db").all(
-        `SELECT r.id, r.rating, r.title, r.body, r.status, r.verified_purchase, r.created_at, p.name AS product, p.slug, u.name AS author
-           FROM reviews r JOIN products p ON p.id = r.product_id JOIN users u ON u.id = r.user_id WHERE r.status = ? ORDER BY r.created_at DESC LIMIT 200`,
-        [status],
-      ),
+      reviews: db
+        .all(
+          `SELECT r.id, r.rating, r.title, r.body, r.status, r.verified_purchase, r.created_at, p.name AS product, p.slug, u.name AS author
+             FROM reviews r JOIN products p ON p.id = r.product_id JOIN users u ON u.id = r.user_id WHERE r.status = ? ORDER BY r.created_at DESC LIMIT 200`,
+          [status],
+        )
+        .map((r) => ({ ...r, photos: reviewPhotos(db, r.id) })),
     });
   })
 
@@ -633,7 +656,7 @@ export const adminRoutes = new Hono<AppEnv>()
     const db = c.get("db");
     const t = db.get("SELECT t.*, o.number AS order_number FROM support_tickets t LEFT JOIN orders o ON o.id = t.order_id WHERE t.id = ?", [Number(c.req.param("id"))]);
     if (!t) throw notFound();
-    return c.json({ ticket: t, messages: db.all("SELECT m.*, u.name AS author FROM ticket_messages m LEFT JOIN users u ON u.id = m.author_user_id WHERE m.ticket_id = ? ORDER BY m.id", [t.id]) });
+    return c.json({ ticket: t, messages: db.all("SELECT m.*, CASE WHEN m.is_ai = 1 THEN 'CrownCart AI (auto-reply)' ELSE u.name END AS author FROM ticket_messages m LEFT JOIN users u ON u.id = m.author_user_id WHERE m.ticket_id = ? ORDER BY m.id", [t.id]) });
   })
 
   .post("/tickets/:id/reply", async (c) => {

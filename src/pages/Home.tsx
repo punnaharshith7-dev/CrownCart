@@ -1,11 +1,14 @@
-import { Suspense, useEffect, useState, Component, type ReactNode } from "react";
+import { Suspense, useEffect, useRef, useState, Component, type ReactNode } from "react";
 import { App } from "../App";
-import { Underlay, Overlay } from "../DirtyFigmaExport";
+import { Underlay } from "../DirtyFigmaExport";
 import { ReviewsGallery } from "../ReviewsGallery";
 import { StackedProductsShowcase } from "../FrostedGlassShowcase";
 import { useTitle } from "../lib/useApi";
 import { useTheme } from "../lib/theme";
+import { afterPageWave } from "../lib/pageWave";
 import { Announcement } from "../components/Announcement";
+import Lenis from "lenis";
+import "lenis/dist/lenis.css";
 
 function webglAvailable() {
   try {
@@ -14,6 +17,40 @@ function webglAvailable() {
   } catch {
     return false;
   }
+}
+
+function PageScrollProgress() {
+  const fillRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+        const progress = maxScroll > 0 ? Math.min(1, Math.max(0, window.scrollY / maxScroll)) : 0;
+        if (fillRef.current) fillRef.current.style.transform = `scaleX(${progress})`;
+      });
+    };
+
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    if (resizeObserver) resizeObserver.observe(document.body);
+    update();
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+      resizeObserver?.disconnect();
+    };
+  }, []);
+
+  return (
+    <div className="home-scroll-progress" aria-hidden="true">
+      <div ref={fillRef} className="home-scroll-progress__fill" />
+    </div>
+  );
 }
 
 /** If the 3D scene throws (driver issues, lost context), the page keeps working without it. */
@@ -30,8 +67,86 @@ class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean
 export default function Home() {
   const [showReviews, setShowReviews] = useState(false);
   const [webgl] = useState(webglAvailable);
+  const pageRef = useRef<HTMLDivElement>(null);
   const { motion } = useTheme();
+  const lenisRef = useRef<Lenis | null>(null);
   useTitle("", { description: "CrownCart — a curated, immersive store for fashion, footwear, timepieces and technology. Beyond Ordinary." });
+
+  useEffect(() => {
+    const root = pageRef.current;
+    if (!root) return;
+
+    let observer: IntersectionObserver | null = null;
+    if (motion !== "reduced" && "IntersectionObserver" in window) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) return;
+            afterPageWave(() => entry.target.classList.add("cc-scroll-revealed"));
+            observer?.unobserve(entry.target);
+          });
+        },
+        { threshold: 0.12, rootMargin: "0px 0px -10% 0px" },
+      );
+    }
+
+    const reveal = (target: HTMLElement) => {
+      target.classList.add("cc-scroll-reveal");
+      if (motion === "reduced" || !observer || target.classList.contains("cc-scroll-revealed")) {
+        target.classList.add("cc-scroll-revealed");
+        return;
+      }
+      const rect = target.getBoundingClientRect();
+      if (rect.top < window.innerHeight * 0.9 && rect.bottom > 0) {
+        afterPageWave(() => target.classList.add("cc-scroll-revealed"));
+      } else {
+        observer.observe(target);
+      }
+    };
+
+    const scan = (node: HTMLElement) => {
+      if (node.matches("[data-scroll-reveal]")) reveal(node);
+      node.querySelectorAll<HTMLElement>("[data-scroll-reveal]").forEach(reveal);
+    };
+
+    scan(root);
+    const mutations = new MutationObserver((records) => {
+      records.forEach((record) => {
+        record.addedNodes.forEach((node) => {
+          if (node instanceof HTMLElement) scan(node);
+        });
+      });
+    });
+    mutations.observe(root, { childList: true, subtree: true });
+
+    return () => {
+      observer?.disconnect();
+      mutations.disconnect();
+    };
+  }, [motion]);
+
+  useEffect(() => {
+    // Inertial wheel scrolling for the homepage only; touch keeps native scrolling.
+    if (motion === "reduced") return;
+    const lenis = new Lenis({
+      autoRaf: true,
+      lerp: 0.085,
+      wheelMultiplier: 0.95,
+      allowNestedScroll: true,
+      anchors: true,
+      prevent: (node) => Boolean(node.closest?.(".reviews-gallery, .modal-backdrop, .assistant, [data-lenis-prevent]")),
+    });
+    lenisRef.current = lenis;
+    return () => {
+      lenis.destroy();
+      lenisRef.current = null;
+    };
+  }, [motion]);
+
+  useEffect(() => {
+    if (showReviews) lenisRef.current?.stop();
+    else lenisRef.current?.start();
+  }, [showReviews]);
 
   useEffect(() => {
     const open = () => setShowReviews(true);
@@ -45,12 +160,15 @@ export default function Home() {
   }, []);
 
   return (
-    <div style={{ width: "100%", minHeight: "100%", position: "relative" }}>
+    <div ref={pageRef} style={{ width: "100%", minHeight: "100%", position: "relative" }}>
+      <PageScrollProgress />
       <Announcement />
       {/* Section 0: Luxury Hero Baubles Scene (100vh) */}
       <section
         id="hero"
+        className="home-hero"
         aria-label="CrownCart"
+        data-scroll-reveal="section"
         style={{
           position: "relative",
           width: "100%",
@@ -72,8 +190,10 @@ export default function Home() {
             style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 50% 55%, rgba(192,57,43,0.18), transparent 55%)" }}
           />
         )}
-        <Overlay />
       </section>
+
+      {/* Eased fade from the light hero into the dark drop stage, kept outside the hero so its text stays untouched. */}
+      <div className="home-hero-fade" aria-hidden="true" />
 
       <StackedProductsShowcase />
 

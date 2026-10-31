@@ -1,13 +1,20 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { StoreLayout } from "../../components/SiteHeader";
-import { ProductCard, type Card } from "../../components/ProductCard";
-import { Button, ErrorState, Loading, Price, Qty, Stars, TextArea, TextField } from "../../components/ui";
+import { GENDER_LABELS, ProductCard, type Card } from "../../components/ProductCard";
+import { FitImage } from "../../components/FitImage";
+import { Button, ErrorState, Price, Qty, Stars } from "../../components/ui";
+import { ReviewForm, ReviewPhotos } from "../../components/ReviewForm";
 import { api, errorMessage } from "../../lib/api";
+import { rememberInterest } from "../../lib/interests";
 import { useAuth } from "../../lib/auth";
 import { date, inr } from "../../lib/format";
 import { useToast } from "../../lib/toast";
 import { useApi, useTitle } from "../../lib/useApi";
+import { BounceHeading } from "../../components/BounceHeading";
+import { ZoomLens } from "../../components/ZoomLens";
+import { flyToBag } from "../../lib/flyToBag";
+import { RecentlyViewed, rememberViewed } from "../../components/RecentlyViewed";
 
 // The 3D viewer (and its WebGL code) loads only when a shopper opens it.
 const ProductViewer3D = lazy(() => import("../../components/ProductViewer3D"));
@@ -41,7 +48,8 @@ interface ProductDetail extends Card {
   media: { id: number; variantId: number | null; kind: string; url: string; alt: string }[];
   specs: { label: string; value: string }[];
   ratingSummary: { average: number | null; total: number; distribution: { star: number; count: number }[] };
-  reviews: { id: number; rating: number; title: string; body: string; verifiedPurchase: boolean; helpfulCount: number; createdAt: string; author: string }[];
+  reviews: { id: number; rating: number; title: string; body: string; verifiedPurchase: boolean; helpfulCount: number; createdAt: string; author: string; photos: string[] }[];
+  canReview: boolean;
   inWishlist: boolean;
   categorySlug: string | null;
 }
@@ -74,49 +82,112 @@ function JsonLd({ p }: { p: ProductDetail }) {
   return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data).replace(/</g, "\\u003c") }} />;
 }
 
-function ReviewForm({ slug, onDone }: { slug: string; onDone: () => void }) {
-  const [rating, setRating] = useState(0);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const toast = useToast();
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 4;
+
+/** Full-screen viewer: the whole image fits the screen; zoom with buttons, wheel or double-click, drag to pan. */
+function Lightbox({ images, index, onIndex, name, onClose }: { images: { url: string; alt?: string | null }[]; index: number; onIndex: (i: number) => void; name: string; onClose: () => void }) {
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [drag, setDrag] = useState<{ x: number; y: number; px: number; py: number } | null>(null);
+  const img = images[index];
+  const many = images.length > 1;
+
+  const zoomTo = (z: number) => {
+    const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+    setZoom(next);
+    if (next === 1) setPan({ x: 0, y: 0 });
+  };
+  const go = (d: number) => {
+    onIndex((index + d + images.length) % images.length);
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+
+  useEffect(() => {
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "+" || e.key === "=") zoomTo(zoom + 0.5);
+      else if (e.key === "-") zoomTo(zoom - 0.5);
+      else if (many && e.key === "ArrowRight") go(1);
+      else if (many && e.key === "ArrowLeft") go(-1);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = overflow;
+    };
+  }); // re-bound each render so arrow keys see the current index
+
   return (
-    <form
-      className="stack card card-flat"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        if (!rating) return setError("Choose a star rating.");
-        setBusy(true);
-        setError(null);
-        try {
-          const r = await api.post<{ moderated: boolean }>(`/catalog/products/${slug}/reviews`, { rating, title, body });
-          toast(r.moderated ? "Thanks! Your review will appear once it's approved." : "Thanks for your review!", "success");
-          onDone();
-        } catch (err) {
-          setError(errorMessage(err));
-        } finally {
-          setBusy(false);
-        }
-      }}
-    >
-      <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-        <legend className="label">Your rating</legend>
-        <div className="row" role="radiogroup">
-          {[1, 2, 3, 4, 5].map((n) => (
-            <button key={n} type="button" role="radio" aria-checked={rating === n} aria-label={`${n} star${n > 1 ? "s" : ""}`} className="link stars" style={{ fontSize: 26, textDecoration: "none" }} onClick={() => setRating(n)}>
-              {n <= rating ? "★" : "☆"}
-            </button>
-          ))}
+    <div className="lightbox" role="dialog" aria-modal="true" aria-label="Full-screen image" onClick={onClose}>
+      <div
+        className={`lightbox-stage${zoom > 1 ? " zoomed" : ""}${drag ? " dragging" : ""}`}
+        onClick={(e) => e.stopPropagation()}
+        onWheel={(e) => zoomTo(zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2))}
+        onDoubleClick={() => zoomTo(zoom > 1 ? 1 : 2.5)}
+        onPointerDown={(e) => {
+          if (zoom <= 1) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setDrag({ x: e.clientX, y: e.clientY, px: pan.x, py: pan.y });
+        }}
+        onPointerMove={(e) => drag && setPan({ x: drag.px + (e.clientX - drag.x) / zoom, y: drag.py + (e.clientY - drag.y) / zoom })}
+        onPointerUp={() => setDrag(null)}
+        onPointerCancel={() => setDrag(null)}
+      >
+        <img src={img.url} alt={img.alt || name} draggable={false} style={{ transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)` }} />
+      </div>
+
+      <button type="button" className="icon-btn lightbox-close" aria-label="Close" autoFocus onClick={onClose}>
+        ✕
+      </button>
+      {many && (
+        <>
+          <button type="button" className="icon-btn lightbox-prev" aria-label="Previous image" onClick={(e) => (e.stopPropagation(), go(-1))}>
+            ‹
+          </button>
+          <button type="button" className="icon-btn lightbox-next" aria-label="Next image" onClick={(e) => (e.stopPropagation(), go(1))}>
+            ›
+          </button>
+        </>
+      )}
+      <div className="lightbox-tools" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="icon-btn" aria-label="Zoom out" disabled={zoom <= ZOOM_MIN} onClick={() => zoomTo(zoom - 0.5)}>
+          −
+        </button>
+        <button type="button" className="lightbox-level" aria-label="Fit to screen" onClick={() => zoomTo(1)}>
+          {Math.round(zoom * 100)}%
+        </button>
+        <button type="button" className="icon-btn" aria-label="Zoom in" disabled={zoom >= ZOOM_MAX} onClick={() => zoomTo(zoom + 0.5)}>
+          +
+        </button>
+        {many && (
+          <span className="lightbox-count">
+            {index + 1} / {images.length}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The page's shape while it loads: the gallery on one side, the buying details on the other. */
+function ProductSkeleton() {
+  return (
+    <div className="container page" role="status" aria-label="Loading product">
+      <div className="pdp" aria-hidden="true">
+        <div className="skeleton gallery-skeleton" />
+        <div className="shimmer-lines">
+          <div className="skeleton" style={{ width: "28%", height: 11 }} />
+          <div className="skeleton" style={{ width: "86%", height: 46 }} />
+          <div className="skeleton" style={{ width: "40%", height: 24 }} />
+          <div className="skeleton" style={{ width: "100%", height: 52, marginTop: 20 }} />
+          <div className="skeleton" style={{ width: "100%", height: 96 }} />
         </div>
-      </fieldset>
-      <TextField label="Headline" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
-      <TextArea label="Review" required value={body} maxLength={4000} onChange={(e) => setBody(e.target.value)} hint="What did you like or dislike? How did you use it?" />
-      {error && <div className="alert alert-danger">{error}</div>}
-      <Button loading={busy} type="submit">
-        Submit review
-      </Button>
-    </form>
+      </div>
+    </div>
   );
 }
 
@@ -147,16 +218,19 @@ export default function Product() {
     setQty(1);
     setMediaIdx(0);
     api.post(`/catalog/products/${slug}/view`).catch(() => {});
+    rememberInterest(slug);
+    if (p) rememberViewed(p);
   }, [p?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const variant = p?.variants.find((v) => v.id === variantId) ?? null;
-  const gallery = useMemo(() => (p ? p.media.filter((m) => m.kind === "image" || m.kind === "hero") : []), [p]);
+  // The product photo leads; the lifestyle hero follows it.
+  const gallery = useMemo(() => (p ? p.media.filter((m) => m.kind === "image" || m.kind === "hero").sort((a, b) => Number(a.kind === "hero") - Number(b.kind === "hero")) : []), [p]);
   const videos = p?.media.filter((m) => m.kind === "video") ?? [];
   const model = p?.media.find((m) => m.kind === "model");
-  const shown = gallery[mediaIdx];
+  const lifestyle = gallery.find((m) => m.kind === "hero") ?? gallery[0];
   const needsSize = Boolean(p && p.variants.length > 1);
 
-  if (loading && !data) return <StoreLayout><Loading /></StoreLayout>;
+  if (loading && !data) return <StoreLayout><ProductSkeleton /></StoreLayout>;
   if (error || !p) return <StoreLayout><ErrorState error={error} retry={reload} /></StoreLayout>;
 
   const priceVariant = variant ?? p.variants[0];
@@ -166,8 +240,9 @@ export default function Product() {
   const add = async () => {
     if (!variant) return toast(`Choose a ${p.variants[0]?.size ? "size" : "option"} first.`, "error");
     setAdding(true);
-    await addToCart(variant.id, qty, { productName: `${p.name}${needsSize ? ` (${variant.name})` : ""}` });
+    const added = await addToCart(variant.id, qty, { productName: `${p.name}${needsSize ? ` (${variant.name})` : ""}` });
     setAdding(false);
+    if (added) flyToBag(document.querySelector(".gallery-main"));
   };
   const toggleWish = async () => {
     if (!user) return navigate(`/signin?returnTo=${encodeURIComponent(location.pathname)}`);
@@ -218,7 +293,7 @@ export default function Product() {
         </nav>
 
         <div className="pdp">
-          <section aria-label="Product images">
+          <section className="pdp-gallery" aria-label="Product images">
             {model && (
               <div className="row" role="group" aria-label="Gallery view" style={{ marginBottom: 12 }}>
                 <button type="button" className="chip" aria-pressed={!view3d} onClick={() => setView3d(false)}>
@@ -233,33 +308,39 @@ export default function Product() {
               <Suspense fallback={<div className="gallery-main"><span className="small muted">Loading 3D viewer…</span></div>}>
                 <ProductViewer3D url={model.url} title={p.name} />
               </Suspense>
-            ) : shown ? (
-              <button type="button" className={`gallery-main${shown.kind === "hero" ? " hero" : ""}`} onClick={() => setLightbox(true)} aria-label="Open full-screen image" style={{ width: "100%", padding: 0 }}>
-                <img src={shown.url} alt={shown.alt || p.name} />
-              </button>
+            ) : gallery.length ? (
+              <div className="pdp-gallery__rail">
+                {gallery.map((m, i) => {
+                  // The clean cutout stands in for the product photo here; full screen shows the original.
+                  const src = m.kind === "image" && p.cutout ? p.cutout : m.url;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className={`gallery-main${m.kind === "hero" ? " hero" : ""}${src !== m.url ? " is-cutout" : ""}`}
+                      onClick={() => (setMediaIdx(i), setLightbox(true))}
+                      aria-label={`Open image ${i + 1} full screen`}
+                    >
+                      {m.kind === "hero" || src !== m.url ? <img src={src} alt={m.alt || p.name} /> : <FitImage src={src} alt={m.alt || p.name} />}
+                      <ZoomLens src={src} />
+                    </button>
+                  );
+                })}
+              </div>
             ) : (
               <div className="gallery-main">No image available</div>
-            )}
-            {!view3d && gallery.length > 1 && (
-              <div className="thumbs" role="group" aria-label="Choose image">
-                {gallery.map((m, i) => (
-                  <button key={m.id} type="button" aria-pressed={i === mediaIdx} aria-label={`Image ${i + 1}`} onClick={() => setMediaIdx(i)}>
-                    <img src={m.url} alt="" />
-                  </button>
-                ))}
-              </div>
             )}
             {videos.map((v) => (
               <video key={v.id} src={v.url} controls muted playsInline preload="metadata" style={{ width: "100%", borderRadius: 16, marginTop: 12 }} aria-label={v.alt || `${p.name} video`} />
             ))}
           </section>
 
-          <section className="stack" style={{ "--gap": "18px" } as React.CSSProperties} aria-label="Product details">
+          <section className="stack pdp-info" style={{ "--gap": "18px" } as React.CSSProperties} aria-label="Product details">
             <div>
-              {p.brand && <div className="eyebrow">{p.brand}</div>}
-              <h1 className="display" style={{ fontSize: "clamp(30px, 4vw, 46px)", marginTop: 4 }}>
+              {(p.brand || p.gender) && <div className="eyebrow">{[p.brand, p.gender && GENDER_LABELS[p.gender]].filter(Boolean).join(" · ")}</div>}
+              <BounceHeading className="display" style={{ fontSize: "clamp(30px, 4vw, 46px)", marginTop: 4 }}>
                 {p.name}
-              </h1>
+              </BounceHeading>
               {p.tagline && <p className="muted" style={{ marginTop: 6 }}>{p.tagline}</p>}
             </div>
             <div className="row">
@@ -270,7 +351,7 @@ export default function Product() {
             </div>
             <p className="tiny muted">{data!.tax.note}</p>
 
-            {needsSize && (
+            {(needsSize || p.variants[0]?.name !== "Standard") && (
               <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
                 <legend className="label" style={{ marginBottom: 8 }}>
                   {p.variants[0].size ? "Size" : "Option"}
@@ -357,47 +438,6 @@ export default function Product() {
               </span>
             </div>
 
-            <div>
-              <details className="acc" open>
-                <summary>Description</summary>
-                <div>{p.description}</div>
-              </details>
-              {p.specs.length > 0 && (
-                <details className="acc" open>
-                  <summary>Specifications</summary>
-                  <div className="spec-grid">
-                    {p.specs.map((s) => (
-                      <div key={s.label}>
-                        <div className="tiny muted">{s.label}</div>
-                        <div className="small" style={{ fontWeight: 600, color: "var(--text)" }}>
-                          {s.value}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
-              {p.care && (
-                <details className="acc">
-                  <summary>Care</summary>
-                  <div>{p.care}</div>
-                </details>
-              )}
-              <details className="acc">
-                <summary>Shipping & returns</summary>
-                <div>
-                  Standard delivery in {data!.delivery.estimateDaysMin}–{data!.delivery.estimateDaysMax} days. Shipping is free on orders over {inr(data!.delivery.freeThresholdPaise)}, otherwise{" "}
-                  {inr(data!.delivery.flatPaise)}. {p.returnDays > 0 ? `Returns accepted within ${p.returnDays} days of delivery.` : "Returns are not accepted for this item."}{" "}
-                  <Link to="/policies/returns">Read the full policy</Link>.
-                </div>
-              </details>
-              {p.warranty && (
-                <details className="acc">
-                  <summary>Warranty</summary>
-                  <div>{p.warranty}</div>
-                </details>
-              )}
-            </div>
             <div className="row small">
               <button type="button" className="link" onClick={share}>
                 Share
@@ -409,21 +449,108 @@ export default function Product() {
           </section>
         </div>
 
+        <div className="pdp-story">
+          <section className="story-row" aria-labelledby="story-h">
+            {lifestyle && (
+              <div className="story-row__img">
+                <img src={lifestyle.url} alt={lifestyle.alt || p.name} loading="lazy" />
+              </div>
+            )}
+            <div className="story-row__text">
+              <div className="eyebrow">The story</div>
+              <h2 className="story-row__title" id="story-h">
+                {p.tagline || p.name}
+              </h2>
+              <p className="story-row__body">{p.description}</p>
+            </div>
+          </section>
+
+          {p.specs.length > 0 && (
+            <section aria-labelledby="specs-h">
+              <div className="eyebrow">In detail</div>
+              <h2 className="story-row__title" id="specs-h">
+                Specifications
+              </h2>
+              <dl className="spec-tiles">
+                {p.specs.map((s) => (
+                  <div key={s.label}>
+                    <dt>{s.label}</dt>
+                    <dd>{s.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          )}
+
+          <section className="story-row story-row--flip" aria-labelledby="owning-h">
+            {gallery[0] && (
+              <div className={`story-row__img${p.cutout ? " is-cutout" : ""}`}>
+                <img src={p.cutout ?? gallery[0].url} alt="" loading="lazy" />
+              </div>
+            )}
+            <div className="story-row__text">
+              <div className="eyebrow">Owning it</div>
+              <h2 className="story-row__title" id="owning-h">
+                Care & assurance
+              </h2>
+              <div>
+                {p.care && (
+                  <details className="acc" open>
+                    <summary>Care</summary>
+                    <div>{p.care}</div>
+                  </details>
+                )}
+                <details className="acc" open={!p.care}>
+                  <summary>Shipping & returns</summary>
+                  <div>
+                    Standard delivery in {data!.delivery.estimateDaysMin}–{data!.delivery.estimateDaysMax} days. Shipping is free on orders over {inr(data!.delivery.freeThresholdPaise)}, otherwise{" "}
+                    {inr(data!.delivery.flatPaise)}. {p.returnDays > 0 ? `Returns accepted within ${p.returnDays} days of delivery.` : "Returns are not accepted for this item."}{" "}
+                    <Link to="/policies/returns">Read the full policy</Link>.
+                  </div>
+                </details>
+                {p.warranty && (
+                  <details className="acc">
+                    <summary>Warranty</summary>
+                    <div>{p.warranty}</div>
+                  </details>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+
         <section id="reviews" style={{ marginTop: 64 }} aria-labelledby="reviews-h">
           <div className="spread" style={{ marginBottom: 20 }}>
             <h2 className="h2" id="reviews-h">
               Reviews
             </h2>
-            {!writing && (
-              <button className="btn btn-outline btn-sm" onClick={() => (user ? setWriting(true) : navigate(`/signin?returnTo=${encodeURIComponent(location.pathname + "#reviews")}`))}>
-                Write a review
+            {!writing && p.canReview && p.ratingSummary.total > 0 && (
+              <button className="btn btn-outline btn-sm" onClick={() => setWriting(true)}>
+                Rate this product
               </button>
             )}
           </div>
+          {p.ratingSummary.total === 0 && !writing && (
+            <div className="reviews-empty">
+              <span className="stars" aria-hidden="true">
+                ☆☆☆☆☆
+              </span>
+              <p className="reviews-empty__line">Be the first to review this</p>
+              {p.canReview ? (
+                <button className="btn btn-outline btn-sm" onClick={() => setWriting(true)}>
+                  Rate this product
+                </button>
+              ) : (
+                <p className="small muted">Reviews come from customers who have received this product.</p>
+              )}
+            </div>
+          )}
+          {writing && p.ratingSummary.total === 0 && <ReviewForm slug={slug} onDone={() => (setWriting(false), reload())} />}
+          {p.ratingSummary.total > 0 && (
           <div className="two-col" style={{ gridTemplateColumns: "280px 1fr" }}>
             <div className="stack">
               <div className="display" style={{ fontSize: 48 }}>
-                {p.ratingSummary.average ?? "–"}
+                {p.ratingSummary.average}
               </div>
               <Stars rating={p.ratingSummary.average} count={p.ratingSummary.total} />
               <div className="rating-bars">
@@ -431,7 +558,7 @@ export default function Product() {
                   <Fragment key={d.star}>
                     <span>{d.star}★</span>
                     <span className="bar">
-                      <span style={{ width: `${p.ratingSummary.total ? (d.count / p.ratingSummary.total) * 100 : 0}%` }} />
+                      <span style={{ width: `${(d.count / p.ratingSummary.total) * 100}%` }} />
                     </span>
                     <span className="muted">
                       {d.count}
@@ -442,7 +569,6 @@ export default function Product() {
             </div>
             <div className="stack">
               {writing && <ReviewForm slug={slug} onDone={() => (setWriting(false), reload())} />}
-              {p.reviews.length === 0 && !writing && <p className="muted">No reviews yet. Customers who buy this product can share their experience here.</p>}
               {p.reviews.map((r) => (
                 <article key={r.id} className="card card-flat stack" style={{ "--gap": "6px" } as React.CSSProperties}>
                   <div className="spread">
@@ -453,7 +579,8 @@ export default function Product() {
                     <span className="tiny muted">{date(r.createdAt)}</span>
                   </div>
                   {r.title && <strong>{r.title}</strong>}
-                  <p className="small">{r.body}</p>
+                  {r.body && <p className="small">{r.body}</p>}
+                  <ReviewPhotos photos={r.photos} />
                   <div className="row tiny muted">
                     <span>{r.author}</span>
                     {r.verifiedPurchase && <span className="badge badge-success">Verified purchase</span>}
@@ -471,6 +598,7 @@ export default function Product() {
               ))}
             </div>
           </div>
+          )}
         </section>
 
         {data!.related.length > 0 && (
@@ -485,16 +613,10 @@ export default function Product() {
             </div>
           </section>
         )}
+        <RecentlyViewed exclude={p.slug} />
       </div>
 
-      {lightbox && shown && (
-        <div className="lightbox" role="dialog" aria-modal="true" aria-label="Full-screen image" onClick={() => setLightbox(false)} onKeyDown={(e) => e.key === "Escape" && setLightbox(false)}>
-          <button type="button" className="icon-btn" aria-label="Close" autoFocus onClick={() => setLightbox(false)}>
-            ✕
-          </button>
-          <img src={shown.url} alt={shown.alt || p.name} />
-        </div>
-      )}
+      {lightbox && gallery[mediaIdx] && <Lightbox images={gallery} index={mediaIdx} onIndex={setMediaIdx} name={p.name} onClose={() => setLightbox(false)} />}
     </StoreLayout>
   );
 }

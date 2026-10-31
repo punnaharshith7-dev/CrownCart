@@ -1,12 +1,40 @@
+# Dependencies and build output
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Secrets: keys, passwords and tokens stay out of git
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Customer and store data
 server/data/
-server/storage/private/
+server/storage/
+public/uploads/
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite3
+
+# Backups, logs and exports
+*.bak
+*.dump
+*.log
+*.csv
+
+# Local tool and system files
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

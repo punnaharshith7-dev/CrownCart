@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { StoreLayout, ThemeSwitch } from "../../components/SiteHeader";
 import { AddressForm, formatAddress, type Address } from "../../components/AddressForm";
-import { Button, Empty, ErrorState, Loading, Modal, PasswordField, Price, SelectField, StatusBadge, TextArea, TextField } from "../../components/ui";
+import { Button, Empty, ErrorState, Loading, Modal, PasswordField, Price, RowSkeletons, SelectField, StatusBadge, TextArea, TextField } from "../../components/ui";
+import { feedbackEnabled, setFeedbackEnabled } from "../../lib/feedback";
 import { api, errorMessage } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { date, dateTime, inr, relative } from "../../lib/format";
@@ -10,7 +11,10 @@ import { useTheme } from "../../lib/theme";
 import { useToast } from "../../lib/toast";
 import { useApi, useTitle } from "../../lib/useApi";
 import { payWithRazorpay } from "../shop/Checkout";
-import type { Card } from "../../components/ProductCard";
+import { CardSkeletons, type Card } from "../../components/ProductCard";
+import { ProfileDetailsFields, profileDetailsFrom, profileDetailsPayload, type ProfileDetailsValue } from "../../components/ProfileDetails";
+import { BounceHeading } from "../../components/BounceHeading";
+import { ReviewForm } from "../../components/ReviewForm";
 
 interface OrderSummary {
   number: string;
@@ -23,6 +27,25 @@ interface OrderSummary {
   itemCount: number;
   preview: string | null;
   storeName: string;
+  tracking?: Tracking | null;
+}
+
+export interface Tracking {
+  status: string;
+  label: string;
+  location: string;
+  at: string;
+}
+
+/** Latest delivery step the partner ticked off, e.g. "In transit · 📍 Ameerpet, Hyderabad · 2h ago". */
+export function TrackLine({ t }: { t?: Tracking | null }) {
+  if (!t) return null;
+  return (
+    <span className="tiny muted track-line">
+      {t.label}
+      {t.location ? ` · 📍 ${t.location}` : ""} · {relative(t.at)}
+    </span>
+  );
 }
 export interface OrderDetail extends OrderSummary {
   subtotalPaise: number;
@@ -37,10 +60,12 @@ export interface OrderDetail extends OrderSummary {
   checkoutId: number;
   shippingAddress: { name: string; phone: string; line1: string; line2: string; city: string; state: string; pincode: string };
   customer: { name: string; email: string } | null;
-  items: { id: number; productName: string; variantName: string; sku: string; image: string | null; unitPricePaise: number; quantity: number; returnedQty: number; lineTotalPaise: number; productSlug: string }[];
+  items: { id: number; productName: string; variantName: string; sku: string; image: string | null; unitPricePaise: number; quantity: number; returnedQty: number; lineTotalPaise: number; productSlug: string; review?: { rating: number; status: string } | null; canReview?: boolean }[];
   history: { from: string | null; to: string; label: string; note: string; at: string; actor: string | null }[];
   shipments: {
     id: number;
+    kind?: string;
+    kindLabel?: string;
     trackingNumber: string;
     carrier: string;
     courierName: string | null;
@@ -48,8 +73,8 @@ export interface OrderDetail extends OrderSummary {
     trackingUrl: string | null;
     status: string;
     partner: { name: string; phone: string | null; status: string; statusLabel: string; failureReason: string | null } | null;
-    events: { status: string; label: string; reason: string; at: string }[];
-    proof: { recipientName: string; otpVerified: boolean; deliveredAt: string; notes: string } | null;
+    events: { status: string; label: string; reason: string; location?: string | null; photo?: string | null; at: string }[];
+    proof: { recipientName: string; otpVerified: boolean; deliveredAt: string; notes: string; photo?: string | null } | null;
   }[];
   returns: { id: number; kind: string; status: string; reason: string; details: string; resolutionNote: string; createdAt: string; items: { orderItemId: number; quantity: number }[] }[];
   refunds: { id: number; amountPaise: number; status: string; reason: string; createdAt: string }[];
@@ -76,7 +101,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <div className="page-head">
           <div>
             <div className="eyebrow">My account</div>
-            <h1 className="display">Hello, {user?.name.split(" ")[0]}</h1>
+            <BounceHeading className="display">{`Hello, ${user?.name.split(" ")[0] ?? ""}`}</BounceHeading>
           </div>
         </div>
         <nav className="tabs" aria-label="Account">
@@ -119,7 +144,10 @@ function OrderRow({ o }: { o: OrderSummary }) {
           {date(o.placedAt)} · {o.itemCount} item{o.itemCount === 1 ? "" : "s"} · {o.storeName}
         </div>
       </div>
-      <StatusBadge status={o.status} label={o.statusLabel} />
+      <span>
+        <StatusBadge status={o.status} label={o.statusLabel} />
+        <TrackLine t={o.tracking} />
+      </span>
       <span className="num" style={{ fontWeight: 600 }}>
         {inr(o.totalPaise)}
       </span>
@@ -187,9 +215,9 @@ function Orders() {
       {error ? (
         <ErrorState error={error} retry={reload} />
       ) : loading && !data ? (
-        <Loading />
+        <RowSkeletons />
       ) : !data?.orders.length ? (
-        <Empty title="No orders here" action={<Link className="btn" to="/shop">Start shopping</Link>} />
+        <Empty title="No orders here" art="orders" action={<Link className="btn" to="/shop">Start shopping</Link>} />
       ) : (
         data.orders.map((o) => <OrderRow key={o.number} o={o} />)
       )}
@@ -214,7 +242,69 @@ export function OrderTimeline({ o }: { o: OrderDetail }) {
   );
 }
 
-export function OrderLines({ o }: { o: OrderDetail }) {
+/** Opens (or reopens) a direct support chat about one ordered product. */
+function ChatAboutItem({ orderNumber, itemId }: { orderNumber: string; itemId: number }) {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      className="btn btn-outline btn-sm"
+      style={{ marginTop: 8 }}
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          const r = await api.post<{ ticketId: number }>("/support/chat", { orderNumber, orderItemId: itemId });
+          navigate(`/account/support/${r.ticketId}`);
+        } catch (e) {
+          toast(errorMessage(e), "error");
+          setBusy(false);
+        }
+      }}
+    >
+      💬 {busy ? "Opening chat…" : "Chat about this item"}
+    </button>
+  );
+}
+
+/** The customer's rating of one delivered product, or the button that opens the rating form. */
+function RateItem({ item }: { item: OrderDetail["items"][number] }) {
+  const [open, setOpen] = useState(false);
+  const [review, setReview] = useState(item.review ?? null);
+  if (review) {
+    const note = review.status === "rejected" ? "Removed by CrownCart" : "Live on the product page";
+    return (
+      <div className="tiny muted" style={{ marginTop: 8 }}>
+        You rated this <span className="stars" aria-label={`${review.rating} out of 5`}>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span> · {note}
+      </div>
+    );
+  }
+  if (!item.canReview) return null;
+  return (
+    <>
+      <button type="button" className="btn btn-outline btn-sm" style={{ marginTop: 8 }} onClick={() => setOpen(true)}>
+        ★ Rate this product
+      </button>
+      {open && (
+        <Modal title="Rate this product" onClose={() => setOpen(false)}>
+          <p className="small muted" style={{ marginBottom: 12 }}>{item.productName}</p>
+          <ReviewForm
+            slug={item.productSlug}
+            onDone={(rating) => {
+              setOpen(false);
+              setReview({ rating, status: "published" });
+            }}
+          />
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/** Order lines. `help` adds per-product chat and rating buttons (customer view only). */
+export function OrderLines({ o, help = false }: { o: OrderDetail; help?: boolean }) {
   return (
     <div className="stack" style={{ "--gap": "4px" } as React.CSSProperties}>
       {o.items.map((i) => (
@@ -229,6 +319,13 @@ export function OrderLines({ o }: { o: OrderDetail }) {
               {i.variantName !== "Standard" && `${i.variantName} · `}SKU {i.sku} · Qty {i.quantity}
               {i.returnedQty > 0 && ` · ${i.returnedQty} returned`}
             </span>
+            {help && !["pending_payment", "failed", "expired"].includes(o.status) && (
+              <>
+                <br />
+                <ChatAboutItem orderNumber={o.number} itemId={i.id} />
+              </>
+            )}
+            {help && <RateItem item={i} />}
           </span>
           <span className="num small">{inr(i.lineTotalPaise)}</span>
         </div>
@@ -286,6 +383,7 @@ export function ShipmentTracking({ o }: { o: OrderDetail }) {
     <>
       {o.shipments.map((s) => (
         <div key={s.id} className="stack" style={{ "--gap": "8px" } as React.CSSProperties}>
+          {s.kind === "return" && <div className="eyebrow">↩ {s.kindLabel ?? "Return pickup"}</div>}
           <div className="small">
             {s.courierName ? `${s.courierName} · ` : ""}Tracking <strong>{s.trackingNumber}</strong> <StatusBadge status={s.status} />
             {s.trackingUrl && (
@@ -317,15 +415,21 @@ export function ShipmentTracking({ o }: { o: OrderDetail }) {
               {s.events.map((e, i) => (
                 <li key={i} className="done">
                   <strong className="small">{e.label}</strong>
+                  {e.location && <div className="small">📍 {e.location}</div>}
                   <div className="tiny muted">{dateTime(e.at)}</div>
                   {e.reason && <div className="small">{e.reason}</div>}
+                  {e.photo && (
+                    <a href={e.photo} target="_blank" rel="noopener" title="Open photo">
+                      <img src={e.photo} alt={`Photo: ${e.label}`} className="chat-photo delivery-photo" loading="lazy" />
+                    </a>
+                  )}
                 </li>
               ))}
             </ol>
           )}
           {s.proof && (
             <div className="small">
-              Delivered to {s.proof.recipientName} on {dateTime(s.proof.deliveredAt)}
+              {s.kind === "return" ? "Handed to the store" : "Delivered"} to {s.proof.recipientName} on {dateTime(s.proof.deliveredAt)}
               {s.proof.otpVerified ? " · confirmed with your delivery code" : ""}.
             </div>
           )}
@@ -420,7 +524,7 @@ function OrderPage() {
         <div className="stack" style={{ "--gap": "24px" } as React.CSSProperties}>
           <section className="card stack">
             <h3 className="h3">Items</h3>
-            <OrderLines o={o} />
+            <OrderLines o={o} help />
           </section>
           <section className="card stack">
             <h3 className="h3">Delivery tracking</h3>
@@ -569,8 +673,8 @@ function Wishlist() {
   const toast = useToast();
   useTitle("Wishlist", { noindex: true });
   if (error) return <ErrorState error={error} retry={reload} />;
-  if (loading && !data) return <Loading />;
-  if (!data?.items.length) return <Empty title="Your wishlist is empty" action={<Link className="btn" to="/shop">Discover products</Link>}>Tap the heart on any product to save it here.</Empty>;
+  if (loading && !data) return <CardSkeletons n={4} />;
+  if (!data?.items.length) return <Empty title="Your wishlist is empty" art="wish" action={<Link className="btn" to="/shop">Discover products</Link>}>Tap the heart on any product to save it here.</Empty>;
   return (
     <div className="product-grid">
       {data.items.map((p) => (
@@ -674,8 +778,8 @@ function Notifications() {
   const navigate = useNavigate();
   useTitle("Notifications", { noindex: true });
   if (error) return <ErrorState error={error} retry={reload} />;
-  if (loading && !data) return <Loading />;
-  if (!data?.notifications.length) return <Empty title="No notifications yet">Order updates, price drops and security alerts will appear here.</Empty>;
+  if (loading && !data) return <RowSkeletons />;
+  if (!data?.notifications.length) return <Empty title="No notifications yet" art="bell">Order updates, price drops and security alerts will appear here.</Empty>;
   return (
     <div className="stack" style={{ "--gap": "8px" } as React.CSSProperties}>
       {data.unread > 0 && (
@@ -714,13 +818,72 @@ function Notifications() {
 
 function Support() {
   const { id } = useParams();
+  const policies = useApi<{ brand: { supportEmail: string } }>("/catalog/policies");
   const list = useApi<{ tickets: { id: number; subject: string; status: string; updated_at: string; order_number: string | null }[] }>(id ? null : "/support/tickets");
-  const one = useApi<{ ticket: { id: number; subject: string; status: string }; messages: { body: string; is_staff: number; author: string; created_at: string }[] }>(id ? `/support/tickets/${id}` : null);
+  const one = useApi<{
+    ticket: { id: number; subject: string; status: string; itemChat?: boolean };
+    messages: { body: string; is_staff: number; is_ai?: number; author: string; created_at: string; photo?: string | null }[];
+    aiReplying?: boolean;
+  }>(id ? `/support/tickets/${id}` : null);
   const [reply, setReply] = useState("");
+  const [sending, setSending] = useState(false);
+  // Set after sending in an item chat until the AI's answer arrives (or ~60s pass).
+  const [awaitingAi, setAwaitingAi] = useState(0);
+  // A photo picked for an item chat, waiting to be sent (with the typed text as its caption).
+  const [photo, setPhoto] = useState<{ file: File; preview: string } | null>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+  const toast = useToast();
+  useEffect(() => () => {
+    if (photo) URL.revokeObjectURL(photo.preview);
+  }, [photo]);
   useTitle("Support", { noindex: true });
+
+  const messages = one.data?.messages ?? [];
+  const lastIsReply = messages.length > 0 && Boolean(messages[messages.length - 1].is_staff);
+  const typing = Boolean(one.data?.aiReplying) || (awaitingAi > Date.now() && !lastIsReply);
+
+  // Live chat: check for new replies every 8 seconds, or every 2.5 while the AI is writing.
+  const reloadOne = one.reload;
+  useEffect(() => {
+    if (!id) return;
+    const t = setInterval(() => document.visibilityState === "visible" && reloadOne(), typing ? 2500 : 8000);
+    return () => clearInterval(t);
+  }, [id, reloadOne, typing]);
+
   if (id) {
     if (one.error) return <ErrorState error={one.error} />;
     if (!one.data) return <Loading />;
+    const pickPhoto = (file: File | undefined) => {
+      if (!file) return;
+      // Photos only: JPG, PNG or WebP (the server checks the file itself too).
+      if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) return toast("Only photos can be sent (JPG, PNG or WebP).", "error");
+      if (file.size > 8 << 20) return toast("That photo is too large (max 8 MB).", "error");
+      setPhoto({ file, preview: URL.createObjectURL(file) });
+    };
+    const send = async () => {
+      const text = reply.trim();
+      if ((!text && !photo) || sending) return;
+      setSending(true);
+      try {
+        let r: { ok: boolean; aiReplying?: boolean };
+        if (photo) {
+          const form = new FormData();
+          form.append("photo", photo.file);
+          if (text) form.append("caption", text);
+          r = await api.upload(`/support/tickets/${id}/photo`, form);
+          setPhoto(null);
+        } else {
+          r = await api.post(`/support/tickets/${id}/reply`, { message: text });
+        }
+        setReply("");
+        if (r.aiReplying) setAwaitingAi(Date.now() + 60_000);
+        one.reload();
+      } catch (e) {
+        toast(errorMessage(e), "error");
+      } finally {
+        setSending(false);
+      }
+    };
     return (
       <div className="stack container-narrow" style={{ padding: 0 }}>
         <Link to="/account/support" className="small">
@@ -730,31 +893,99 @@ function Support() {
           <h2 className="h2">{one.data.ticket.subject}</h2>
           <StatusBadge status={one.data.ticket.status} />
         </div>
-        {one.data.messages.map((m, i) => (
-          <div key={i} className="card card-flat" style={{ background: m.is_staff ? "var(--surface-2)" : undefined }}>
-            <div className="tiny muted">
-              {m.author} · {dateTime(m.created_at)}
+        <div className="support-chat" aria-live="polite">
+          {one.data.messages.length === 0 && <p className="small muted">Tell us what you need help with — our team will reply right here, and you'll get a notification.</p>}
+          {one.data.messages.map((m, i) => (
+            <div key={i} className={`ai-msg ${m.is_staff ? "ai-msg--assistant" : "ai-msg--user"}`}>
+              <div className="tiny" style={{ opacity: 0.7, marginBottom: 4 }}>
+                {m.is_staff ? (m.is_ai ? "✦ CrownCart AI" : m.author) : "You"} · {dateTime(m.created_at)}
+              </div>
+              {m.photo ? (
+                <>
+                  <a href={m.photo} target="_blank" rel="noopener">
+                    <img src={m.photo} alt="Photo you sent" className="chat-photo" loading="lazy" />
+                  </a>
+                  {m.body !== "📷 Photo" && <p>{m.body.replace(/^📷 /, "")}</p>}
+                </>
+              ) : (
+                <p>{m.body}</p>
+              )}
             </div>
-            <p className="small" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
-              {m.body}
-            </p>
+          ))}
+          {typing && (
+            <div className="ai-msg ai-msg--assistant ai-msg--thinking">
+              <span className="ai-dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+              CrownCart AI is typing…
+            </div>
+          )}
+        </div>
+        {photo && (
+          <div className="chat-photo-pending">
+            <img src={photo.preview} alt="Photo to send" />
+            <span className="small muted">Add a caption below (optional), then send.</span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPhoto(null)} disabled={sending}>
+              Remove
+            </button>
           </div>
-        ))}
-        <form className="stack" onSubmit={(e) => (e.preventDefault(), api.post(`/support/tickets/${id}/reply`, { message: reply }).then(() => (setReply(""), one.reload())))}>
-          <TextArea label="Reply" value={reply} onChange={(e) => setReply(e.target.value)} />
-          <Button type="submit" disabled={reply.trim().length < 2}>
-            Send
-          </Button>
+        )}
+        <form className="ai-input" onSubmit={(e) => (e.preventDefault(), send())}>
+          {one.data.ticket.itemChat && (
+            <>
+              <input
+                ref={photoInput}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                hidden
+                onChange={(e) => {
+                  pickPhoto(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+              <button type="button" className="btn btn-ghost" aria-label="Add a photo" title="Add a photo" onClick={() => photoInput.current?.click()} disabled={sending}>
+                📷
+              </button>
+            </>
+          )}
+          <label className="sr-only" htmlFor="support-reply">
+            Message
+          </label>
+          <textarea
+            id="support-reply"
+            className="textarea"
+            rows={1}
+            maxLength={4000}
+            placeholder={photo ? "Add a caption (optional)…" : "Type a message…"}
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+          />
+          <button type="submit" className="btn" disabled={sending || (!reply.trim() && !photo)}>
+            {sending ? "Sending…" : "Send"}
+          </button>
         </form>
       </div>
     );
   }
   return (
     <div className="stack">
-      <div>
+      <div className="row">
         <Link className="btn" to="/contact">
           New request
         </Link>
+        {policies.data?.brand.supportEmail && (
+          <span className="small muted">
+            Or write to <a href={`mailto:${policies.data.brand.supportEmail}`}>{policies.data.brand.supportEmail}</a>
+          </span>
+        )}
       </div>
       {list.data?.tickets.length ? (
         <div className="table-wrap">
@@ -921,9 +1152,71 @@ function Rewards() {
   );
 }
 
+/** Passkeys: sign in with Face ID, fingerprint or the device PIN instead of a password. */
+function Passkeys() {
+  const list = useApi<{ passkeys: { id: number; name: string; createdAt: string; lastUsedAt: string | null }[] }>("/auth/passkeys");
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const add = async () => {
+    if (!window.PublicKeyCredential) return toast("This browser doesn't support passkeys.", "error");
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(location.hostname)) return toast("Passkeys need the site's name, not an IP address. Open localhost or the live domain.", "error");
+    setBusy(true);
+    try {
+      const { startRegistration } = await import("@simplewebauthn/browser");
+      const optionsJSON = await api.post<any>("/auth/passkeys/register/options");
+      const response = await startRegistration({ optionsJSON });
+      await api.post("/auth/passkeys/register/verify", { response });
+      toast("Passkey added. You can now sign in without a password.", "success");
+      list.reload();
+    } catch (e) {
+      if (!(e instanceof Error && (e.name === "NotAllowedError" || e.name === "AbortError"))) toast(errorMessage(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="card stack">
+      <div className="spread">
+        <h2 className="h3">Passkeys</h2>
+        <Button className="btn-outline btn-sm" loading={busy} onClick={add}>
+          Add a passkey
+        </Button>
+      </div>
+      <p className="small muted">Sign in with your fingerprint, face or device PIN. Nothing to remember, and it can't be phished.</p>
+      {list.data?.passkeys.map((k) => (
+        <div key={k.id} className="spread small">
+          <span>
+            {k.name}
+            <br />
+            <span className="tiny muted">Added {date(k.createdAt)}{k.lastUsedAt ? ` · last used ${relative(k.lastUsedAt)}` : ""}</span>
+          </span>
+          <button className="link small" onClick={() => api.del(`/auth/passkeys/${k.id}`).then(list.reload)}>
+            Remove
+          </button>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function Settings() {
   const { user, refresh, signOut } = useAuth();
-  const profile = useApi<{ name: string; phone: string | null; email: string; preferences: Record<string, any>; hasPassword: boolean; googleLinked: boolean }>("/account/profile");
+  const profile = useApi<{
+    name: string;
+    phone: string | null;
+    age: number | null;
+    gender: string | null;
+    heightCm: number | null;
+    weightKg: number | null;
+    email: string;
+    preferences: Record<string, any>;
+    hasPassword: boolean;
+    googleLinked: boolean;
+  }>("/account/profile");
+  const [details, setDetails] = useState<ProfileDetailsValue | null>(null);
+  useEffect(() => {
+    if (profile.data) setDetails(profileDetailsFrom(profile.data));
+  }, [profile.data]);
   const sessions = useApi<{ sessions: { id: string; current: boolean; lastSeenAt: string; ip: string; userAgent: string }[] }>("/auth/sessions");
   const { motion, setMotion } = useTheme();
   const toast = useToast();
@@ -933,7 +1226,7 @@ function Settings() {
   const [delPw, setDelPw] = useState("");
   const [delErr, setDelErr] = useState<string | null>(null);
   useTitle("Settings", { noindex: true });
-  if (!profile.data) return profile.error ? <ErrorState error={profile.error} /> : <Loading />;
+  if (!profile.data || !details) return profile.error ? <ErrorState error={profile.error} /> : <Loading />;
   const prefs = profile.data.preferences;
   const setPref = (k: string, v: unknown) =>
     api
@@ -947,9 +1240,8 @@ function Settings() {
         className="card stack"
         onSubmit={async (e) => {
           e.preventDefault();
-          const fd = new FormData(e.currentTarget);
           try {
-            await api.patch("/account/profile", { name: fd.get("name"), phone: fd.get("phone") });
+            await api.patch("/account/profile", profileDetailsPayload(details));
             await refresh();
             toast("Profile updated.", "success");
           } catch (err) {
@@ -958,9 +1250,8 @@ function Settings() {
         }}
       >
         <h2 className="h3">Profile</h2>
-        <TextField label="Name" name="name" defaultValue={profile.data.name} required />
         <TextField label="Email" value={profile.data.email} disabled hint={user?.emailVerified ? "Verified" : "Not verified yet"} />
-        <TextField label="Mobile" name="phone" type="tel" defaultValue={profile.data.phone ?? ""} />
+        <ProfileDetailsFields value={details} onChange={setDetails} />
         <Button type="submit">Save profile</Button>
       </form>
 
@@ -1009,6 +1300,10 @@ function Settings() {
           <input type="checkbox" checked={motion === "reduced"} onChange={(e) => setMotion(e.target.checked ? "reduced" : "full")} />
           <span>Reduce motion (also turns off the 3D homepage scene)</span>
         </label>
+        <label className="check">
+          <input type="checkbox" defaultChecked={feedbackEnabled()} onChange={(e) => setFeedbackEnabled(e.target.checked)} />
+          <span>Play a soft click and a light vibration when adding to bag</span>
+        </label>
       </section>
 
       <section className="card stack">
@@ -1039,6 +1334,8 @@ function Settings() {
           Sent to the phone number on each order: order confirmation, out-for-delivery (with your delivery code) and delivered. Off unless you turn it on. Order and security emails are always sent.
         </p>
       </section>
+
+      <Passkeys />
 
       <section className="card stack">
         <div className="spread">

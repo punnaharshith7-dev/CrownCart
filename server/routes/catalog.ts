@@ -1,8 +1,13 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Hono } from "hono";
 import { z } from "zod";
+import { config } from "../config.ts";
 import type { AppEnv } from "../context.ts";
 import type { Db, Row } from "../db.ts";
 import { notFound, badRequest, forbidden } from "../lib/errors.ts";
+import { hasReceivedProduct, MAX_REVIEW_PHOTOS, reviewPhotos } from "../lib/reviews.ts";
+import { saveUpload } from "../lib/uploads.ts";
 import { body, query } from "../lib/validate.ts";
 import { requireUser } from "../lib/auth.ts";
 import { getSetting } from "../lib/settings.ts";
@@ -10,7 +15,7 @@ import { rateLimit } from "../lib/rate-limit.ts";
 
 /** Columns every product card needs. Only active products in active stores are public. */
 const CARD_SQL = `
-  SELECT p.id, p.slug, p.name, p.badge, p.tagline, p.is_featured, p.created_at, p.view_count,
+  SELECT p.id, p.slug, p.name, p.badge, p.tagline, p.gender, p.is_featured, p.created_at, p.view_count,
          b.name AS brand, b.slug AS brand_slug, c.name AS category, c.slug AS category_slug,
          (SELECT MIN(v.price_paise) FROM product_variants v WHERE v.product_id = p.id AND v.is_active = 1) AS price_paise,
          (SELECT v.compare_at_paise FROM product_variants v WHERE v.product_id = p.id AND v.is_active = 1 ORDER BY v.price_paise LIMIT 1) AS compare_at_paise,
@@ -18,6 +23,8 @@ const CARD_SQL = `
            WHERE v.product_id = p.id AND v.is_active = 1) AS available,
          (SELECT url FROM product_media m WHERE m.product_id = p.id AND m.kind = 'image' ORDER BY m.sort_order LIMIT 1) AS image,
          (SELECT url FROM product_media m WHERE m.product_id = p.id AND m.kind = 'hero' ORDER BY m.sort_order LIMIT 1) AS hero_image,
+         (SELECT json_group_array(json_object('id', v.id, 'name', v.name, 'available', (SELECT COALESCE(SUM(MAX(i.on_hand - i.reserved, 0)), 0) FROM inventory i WHERE i.variant_id = v.id)))
+            FROM (SELECT id, name FROM product_variants WHERE product_id = p.id AND is_active = 1 ORDER BY id) v) AS card_variants,
          (SELECT AVG(r.rating) FROM reviews r WHERE r.product_id = p.id AND r.status = 'published') AS rating,
          (SELECT COUNT(*) FROM reviews r WHERE r.product_id = p.id AND r.status = 'published') AS review_count,
          (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi JOIN orders o ON o.id = oi.order_id
@@ -27,6 +34,20 @@ const CARD_SQL = `
     LEFT JOIN brands b ON b.id = p.brand_id
     LEFT JOIN categories c ON c.id = p.category_id
    WHERE p.status = 'active'`;
+
+/** Transparent product cutouts generated ahead of time (public/cutouts/index.json). Not every product has one. */
+let cutouts: Record<string, { src: string; ok: boolean }> | null = null;
+function cutoutFor(slug: string): string | null {
+  if (!cutouts) {
+    try {
+      cutouts = JSON.parse(readFileSync(join(config.rootDir, "public", "cutouts", "index.json"), "utf8")) as Record<string, { src: string; ok: boolean }>;
+    } catch {
+      cutouts = {};
+    }
+  }
+  const c = cutouts[slug];
+  return c?.ok ? c.src : null;
+}
 
 export function toCard(r: Row) {
   const discount =
@@ -43,7 +64,12 @@ export function toCard(r: Row) {
     categorySlug: r.category_slug,
     badge: r.badge,
     tagline: r.tagline,
+    gender: r.gender ?? null,
     image: r.image ?? r.hero_image,
+    // The hover view on cards: the product's other photo, when it has one.
+    altImage: r.image && r.hero_image && r.hero_image !== r.image ? r.hero_image : null,
+    cutout: cutoutFor(r.slug),
+    variants: r.card_variants ? (JSON.parse(r.card_variants) as { id: number; name: string; available: number }[]) : [],
     pricePaise: r.price_paise,
     compareAtPaise: discount ? r.compare_at_paise : null,
     discountPercent: discount,
@@ -67,7 +93,8 @@ const SORTS: Record<string, string> = {
 const listParams = z.object({
   q: z.string().trim().max(100).optional(),
   category: z.string().max(80).optional(),
-  brand: z.string().max(400).optional(), // comma-separated slugs
+  brand: z.string().max(2000).optional(), // comma-separated slugs
+  gender: z.enum(["men", "women", "unisex"]).optional(),
   minPrice: z.coerce.number().int().min(0).optional(), // rupees
   maxPrice: z.coerce.number().int().min(0).optional(),
   inStock: z.enum(["1", "0"]).optional(),
@@ -177,9 +204,14 @@ export function searchProducts(db: Db, p: z.infer<typeof listParams>) {
     else where.push(`p.category_id IN (${ids.map(() => "?").join(",")})`), params.push(...ids);
   }
   if (p.brand) {
-    const brands = p.brand.split(",").filter(Boolean).slice(0, 20);
+    const brands = p.brand.split(",").filter(Boolean).slice(0, 100);
     where.push(`b.slug IN (${brands.map(() => "?").join(",")})`);
     params.push(...brands);
+  }
+  // Unisex products are for everyone, so they also show under Men and Women.
+  if (p.gender) {
+    where.push(p.gender === "unisex" ? "p.gender = 'unisex'" : "p.gender IN (?, 'unisex')");
+    if (p.gender !== "unisex") params.push(p.gender);
   }
 
   const having: string[] = [];
@@ -209,15 +241,20 @@ function facets(db: Db) {
     `SELECT b.name, b.slug, COUNT(p.id) AS count FROM brands b
        JOIN products p ON p.brand_id = b.id AND p.status = 'active'
        JOIN stores s ON s.id = p.store_id AND s.status = 'active'
-      GROUP BY b.id ORDER BY b.name`,
+      GROUP BY b.id ORDER BY b.name COLLATE NOCASE`,
   );
   const price = db.get(
     `SELECT MIN(v.price_paise) AS min, MAX(v.price_paise) AS max FROM product_variants v
        JOIN products p ON p.id = v.product_id AND p.status = 'active' WHERE v.is_active = 1`,
   );
+  const gender = db.get(
+    `SELECT COALESCE(SUM(p.gender IN ('men', 'unisex')), 0) AS men, COALESCE(SUM(p.gender IN ('women', 'unisex')), 0) AS women, COALESCE(SUM(p.gender = 'unisex'), 0) AS unisex
+       FROM products p JOIN stores s ON s.id = p.store_id AND s.status = 'active' WHERE p.status = 'active'`,
+  )!;
   return {
     categories: categories.map((c) => ({ id: c.id, name: c.name, slug: c.slug, parentId: c.parent_id, description: c.description, count: c.count })),
     brands,
+    genders: { men: gender.men, women: gender.women, unisex: gender.unisex },
     priceRange: { min: Math.floor((price?.min ?? 0) / 100), max: Math.ceil((price?.max ?? 0) / 100) },
   };
 }
@@ -266,6 +303,24 @@ export const catalogRoutes = new Hono<AppEnv>()
   })
 
   .get("/facets", (c) => c.json(facets(c.get("db"))))
+
+  // Brand directory: every brand with live products, its categories, starting price and a few pieces.
+  .get("/brands", (c) => {
+    const db = c.get("db");
+    const cards = db.all(`${CARD_SQL} AND b.id IS NOT NULL ORDER BY p.is_featured DESC, p.view_count DESC`).map(toCard);
+    type BrandEntry = { name: string; slug: string; count: number; fromPaise: number | null; categories: string[]; products: ReturnType<typeof toCard>[] };
+    const byBrand = new Map<string, BrandEntry>();
+    for (const card of cards) {
+      const entry: BrandEntry = byBrand.get(card.brandSlug) ?? { name: card.brand, slug: card.brandSlug, count: 0, fromPaise: null, categories: [], products: [] };
+      entry.count++;
+      if (card.pricePaise != null && (entry.fromPaise == null || card.pricePaise < entry.fromPaise)) entry.fromPaise = card.pricePaise;
+      if (card.category && !entry.categories.includes(card.category)) entry.categories.push(card.category);
+      if (entry.products.length < 3) entry.products.push(card);
+      byBrand.set(card.brandSlug, entry);
+    }
+    const brands = [...byBrand.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+    return c.json({ brands });
+  })
 
   .get("/products", (c) => {
     const db = c.get("db");
@@ -381,7 +436,10 @@ export const catalogRoutes = new Hono<AppEnv>()
           helpfulCount: r.helpful_count,
           createdAt: r.created_at,
           author: r.name.split(" ")[0],
+          photos: reviewPhotos(db, r.id),
         })),
+        canReview:
+          Boolean(u) && getSetting(db, "features").reviews && hasReceivedProduct(db, u!.id, p.id) && !db.get("SELECT 1 FROM reviews WHERE product_id = ? AND user_id = ?", [p.id, u!.id]),
         inWishlist: u ? Boolean(db.get("SELECT 1 FROM wishlist_items WHERE user_id = ? AND product_id = ?", [u.id, p.id])) : false,
       },
       related: relatedAll.map(toCard),
@@ -416,33 +474,36 @@ export const catalogRoutes = new Hono<AppEnv>()
     const db = c.get("db");
     const p = db.get("SELECT id FROM products WHERE slug = ? AND status = 'active'", [c.req.param("slug")]);
     if (!p) throw notFound();
-    const input = await body(
-      c,
-      z.object({
-        rating: z.number().int().min(1).max(5),
+    const form = await c.req.formData().catch(() => null);
+    if (!form) throw badRequest("Couldn't read the upload. Try again.");
+    const input = z
+      .object({
+        rating: z.coerce.number({ message: "Choose a star rating." }).int().min(1, "Choose a star rating.").max(5),
         title: z.string().trim().max(120).default(""),
-        body: z.string().trim().min(10, "Tell other shoppers a little more (at least 10 characters).").max(4000),
-      }),
-    );
-    const purchased = Boolean(
-      db.get(
-        "SELECT 1 FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE o.user_id = ? AND oi.product_id = ? AND o.status IN ('delivered','return_requested','returned')",
-        [u.id, p.id],
-      ),
-    );
-    const policy = getSetting(db, "reviews");
-    if (policy.verifiedPurchaseOnly && !purchased) throw forbidden("Only customers who received this product can review it.");
+        body: z.string().trim().max(4000).default(""),
+      })
+      .safeParse({ rating: form.get("rating"), title: form.get("title") ?? undefined, body: form.get("body") ?? undefined });
+    if (!input.success) throw badRequest(input.error.issues[0]?.message ?? "Check the details and try again.");
+    if (!hasReceivedProduct(db, u.id, p.id)) throw forbidden("Only customers who received this product can rate it.");
     if (db.get("SELECT 1 FROM reviews WHERE product_id = ? AND user_id = ?", [p.id, u.id])) throw badRequest("You have already reviewed this product.");
-    db.run("INSERT INTO reviews (product_id, user_id, rating, title, body, verified_purchase, status) VALUES (?, ?, ?, ?, ?, ?, ?)", [
-      p.id,
-      u.id,
-      input.rating,
-      input.title,
-      input.body,
-      purchased ? 1 : 0,
-      policy.requireModeration ? "pending" : "published",
-    ]);
-    return c.json({ ok: true, moderated: policy.requireModeration }, 201);
+    const files: File[] = [];
+    for (const f of form.getAll("photos")) if (f instanceof File && f.size > 0) files.push(f);
+    if (files.length > MAX_REVIEW_PHOTOS) throw badRequest(`You can add up to ${MAX_REVIEW_PHOTOS} photos.`);
+    // Photos only (JPG, PNG, WebP), checked by their bytes.
+    const dir = join(config.publicUploadDir, "reviews");
+    const photos: string[] = [];
+    for (const f of files) photos.push(`/uploads/reviews/${(await saveUpload(f, dir, ["image"])).name}`);
+    db.tx(() => {
+      const reviewId = db.run("INSERT INTO reviews (product_id, user_id, rating, title, body, verified_purchase, status) VALUES (?, ?, ?, ?, ?, 1, 'published')", [
+        p.id,
+        u.id,
+        input.data.rating,
+        input.data.title,
+        input.data.body,
+      ]).lastId;
+      photos.forEach((url, i) => db.run("INSERT INTO review_photos (review_id, url, sort_order) VALUES (?, ?, ?)", [reviewId, url, i]));
+    });
+    return c.json({ ok: true }, 201);
   })
 
   .post("/reviews/:id/helpful", (c) => {
@@ -463,7 +524,7 @@ export const catalogRoutes = new Hono<AppEnv>()
       `SELECT r.id, r.rating, r.title, r.body, r.verified_purchase, r.created_at, u.name, p.name AS product, p.slug,
               (SELECT url FROM product_media m WHERE m.product_id = p.id AND m.kind IN ('hero','image') ORDER BY m.kind = 'hero' DESC, m.sort_order LIMIT 1) AS image
          FROM reviews r JOIN users u ON u.id = r.user_id JOIN products p ON p.id = r.product_id
-        WHERE r.status = 'published' AND p.status = 'active'
+        WHERE r.status = 'published' AND p.status = 'active' AND (r.body != '' OR r.title != '')
         ORDER BY r.verified_purchase DESC, r.helpful_count DESC, r.created_at DESC LIMIT 9`,
     );
     const agg = db.get("SELECT AVG(rating) avg, COUNT(*) n FROM reviews WHERE status = 'published'")!;
@@ -477,7 +538,7 @@ export const catalogRoutes = new Hono<AppEnv>()
         productSlug: r.slug,
         rating: r.rating,
         title: r.title,
-        review: r.body,
+        review: r.body || r.title,
         verifiedPurchase: Boolean(r.verified_purchase),
         createdAt: r.created_at,
         image: r.image,

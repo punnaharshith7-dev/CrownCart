@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { StoreLayout } from "../../components/SiteHeader";
-import { Button, Empty, ErrorState, Loading, Modal, Qty } from "../../components/ui";
+import { Button, Empty, ErrorState, Loading, Modal, Qty, RowSkeletons } from "../../components/ui";
 import { api, errorMessage } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { inr } from "../../lib/format";
 import { useToast } from "../../lib/toast";
 import { useTitle } from "../../lib/useApi";
+import { BounceHeading } from "../../components/BounceHeading";
 
 export interface Line {
   itemId: number;
@@ -53,7 +54,7 @@ export const savedCoupon = () => {
     return "";
   }
 };
-const storeCoupon = (c: string) => {
+export const storeCoupon = (c: string) => {
   try {
     c ? sessionStorage.setItem(COUPON_KEY, c) : sessionStorage.removeItem(COUPON_KEY);
   } catch {
@@ -204,20 +205,20 @@ export default function Cart() {
     return (
       <StoreLayout>
         <div className="container page">
-          <Empty title="Your bag" action={<Link className="btn" to="/signin?returnTo=%2Fcart">Sign in to see your bag</Link>}>
+          <Empty title="Your bag" art="bag" action={<Link className="btn" to="/signin?returnTo=%2Fcart">Sign in to see your bag</Link>}>
             Your bag is saved to your account so it follows you across devices.
           </Empty>
         </div>
       </StoreLayout>
     );
   if (error) return <StoreLayout><ErrorState error={error} retry={() => load()} /></StoreLayout>;
-  if (!cart) return <StoreLayout><Loading /></StoreLayout>;
+  if (!cart) return <StoreLayout><div className="container page"><RowSkeletons /></div></StoreLayout>;
 
   return (
     <StoreLayout>
       <div className="container page">
         <div className="page-head">
-          <h1 className="display">Your bag</h1>
+          <BounceHeading className="display">Your bag</BounceHeading>
           {cart.lines.length > 0 && (
             <button type="button" className="link small" onClick={() => setConfirmClear(true)}>
               Clear bag
@@ -225,7 +226,7 @@ export default function Cart() {
           )}
         </div>
         {cart.lines.length === 0 ? (
-          <Empty title="Your bag is empty" action={<Link className="btn" to="/shop">Continue shopping</Link>}>
+          <Empty title="Your bag is empty" art="bag" action={<Link className="btn" to="/shop">Continue shopping</Link>}>
             {cart.saved.length ? "You have items saved for later below." : "Discover something extraordinary."}
           </Empty>
         ) : (

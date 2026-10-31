@@ -1,0 +1,338 @@
+{
+  "adidas-yeezy-boost-350-v2-bone-primeknit": {
+    "src": "/cutouts/adidas-yeezy-boost-350-v2-bone-primeknit.webp",
+    "w": 543,
+    "h": 314,
+    "coverage": 0.558,
+    "ok": true
+  },
+  "adidas-originals-samba-og-cloud-white-core-black": {
+    "src": "/cutouts/adidas-originals-samba-og-cloud-white-core-black.webp",
+    "w": 495,
+    "h": 546,
+    "coverage": 0.386,
+    "ok": true
+  },
+  "apple-iphone-16-pro-max-1tb-desert-titanium": {
+    "src": "/cutouts/apple-iphone-16-pro-max-1tb-desert-titanium.webp",
+    "w": 445,
+    "h": 900,
+    "coverage": 0.826,
+    "ok": true
+  },
+  "apple-macbook-pro-16-m4-max-space-black": {
+    "src": "/cutouts/apple-macbook-pro-16-m4-max-space-black.webp",
+    "w": 800,
+    "h": 640,
+    "coverage": 0.51,
+    "ok": false
+  },
+  "armani-exchange-signature-bomber": {
+    "src": "/cutouts/armani-exchange-signature-bomber.webp",
+    "w": 361,
+    "h": 373,
+    "coverage": 0.602,
+    "ok": true
+  },
+  "armani-exchange-monogram-quilted-puffer": {
+    "src": "/cutouts/armani-exchange-monogram-quilted-puffer.webp",
+    "w": 469,
+    "h": 467,
+    "coverage": 0.379,
+    "ok": true
+  },
+  "asus-proart-studiobook-16-oled-workstation": {
+    "src": "/cutouts/asus-proart-studiobook-16-oled-workstation.webp",
+    "w": 612,
+    "h": 503,
+    "coverage": 0.52,
+    "ok": true
+  },
+  "asus-tuf-gaming-a15-mecha": {
+    "src": "/cutouts/asus-tuf-gaming-a15-mecha.webp",
+    "w": 425,
+    "h": 324,
+    "coverage": 0.718,
+    "ok": true
+  },
+  "audemars-piguet-royal-oak-jumbo-16202st": {
+    "src": "/cutouts/audemars-piguet-royal-oak-jumbo-16202st.webp",
+    "w": 659,
+    "h": 374,
+    "coverage": 0.637,
+    "ok": true
+  },
+  "audemars-piguet-royal-oak-offshore-chronograph-43mm": {
+    "src": "/cutouts/audemars-piguet-royal-oak-offshore-chronograph-43mm.webp",
+    "w": 401,
+    "h": 193,
+    "coverage": 0.588,
+    "ok": true
+  },
+  "balenciaga-triple-s-clear-sole-sneaker-white-grey": {
+    "src": "/cutouts/balenciaga-triple-s-clear-sole-sneaker-white-grey.webp",
+    "w": 442,
+    "h": 252,
+    "coverage": 0.483,
+    "ok": true
+  },
+  "balenciaga-speed-2-0-recycled-knit-sock-sneaker": {
+    "src": "/cutouts/balenciaga-speed-2-0-recycled-knit-sock-sneaker.webp",
+    "w": 528,
+    "h": 722,
+    "coverage": 0.469,
+    "ok": true
+  },
+  "bang-olufsen-beosound-2-3rd-gen-wireless-speaker": {
+    "src": "/cutouts/bang-olufsen-beosound-2-3rd-gen-wireless-speaker.webp",
+    "w": 397,
+    "h": 167,
+    "coverage": 0.085,
+    "ok": false
+  },
+  "bang-olufsen-beoplay-h95-flagship-anc-headphones": {
+    "src": "/cutouts/bang-olufsen-beoplay-h95-flagship-anc-headphones.webp",
+    "w": 381,
+    "h": 402,
+    "coverage": 0.322,
+    "ok": true
+  },
+  "bose-quietcomfort-ultra-wireless-headphones-black": {
+    "src": "/cutouts/bose-quietcomfort-ultra-wireless-headphones-black.webp",
+    "w": 381,
+    "h": 402,
+    "coverage": 0.322,
+    "ok": true
+  },
+  "bose-smart-ultra-soundbar-dolby-atmos": {
+    "src": "/cutouts/bose-smart-ultra-soundbar-dolby-atmos.webp",
+    "w": 334,
+    "h": 347,
+    "coverage": 0.526,
+    "ok": true
+  },
+  "cartier-santos-de-cartier-large-model-steel": {
+    "src": "/cutouts/cartier-santos-de-cartier-large-model-steel.webp",
+    "w": 525,
+    "h": 395,
+    "coverage": 0.593,
+    "ok": true
+  },
+  "cartier-tank-must-extra-large-model-automatic": {
+    "src": "/cutouts/cartier-tank-must-extra-large-model-automatic.webp",
+    "w": 724,
+    "h": 529,
+    "coverage": 0.217,
+    "ok": true
+  },
+  "creed-aventus-eau-de-parfum-100ml": {
+    "src": "/cutouts/creed-aventus-eau-de-parfum-100ml.webp",
+    "w": 299,
+    "h": 418,
+    "coverage": 0.699,
+    "ok": true
+  },
+  "creed-green-irish-tweed-eau-de-parfum-100ml": {
+    "src": "/cutouts/creed-green-irish-tweed-eau-de-parfum-100ml.webp",
+    "w": 330,
+    "h": 522,
+    "coverage": 0.816,
+    "ok": true
+  },
+  "dior-b23-high-top-sneaker-dior-oblique-canvas": {
+    "src": "/cutouts/dior-b23-high-top-sneaker-dior-oblique-canvas.webp",
+    "w": 475,
+    "h": 310,
+    "coverage": 0.483,
+    "ok": true
+  },
+  "dior-saddle-bag-black-grained-calfskin": {
+    "src": "/cutouts/dior-saddle-bag-black-grained-calfskin.webp",
+    "w": 657,
+    "h": 761,
+    "coverage": 0.583,
+    "ok": true
+  },
+  "dyson-purifier-cool-gen1-hepa-air-purifier": {
+    "src": "/cutouts/dyson-purifier-cool-gen1-hepa-air-purifier.webp",
+    "w": 642,
+    "h": 355,
+    "coverage": 0.297,
+    "ok": false
+  },
+  "dyson-v15-detect-extra-cordless-vacuum-cleaner": {
+    "src": "/cutouts/dyson-v15-detect-extra-cordless-vacuum-cleaner.webp",
+    "w": 447,
+    "h": 600,
+    "coverage": 0.207,
+    "ok": false
+  },
+  "gucci-interlocking-g-technical-zip-track-jacket": {
+    "src": "/cutouts/gucci-interlocking-g-technical-zip-track-jacket.webp",
+    "w": 626,
+    "h": 850,
+    "coverage": 0.624,
+    "ok": false
+  },
+  "gucci-gg-supreme-monogram-canvas-bomber-jacket": {
+    "src": "/cutouts/gucci-gg-supreme-monogram-canvas-bomber-jacket.webp",
+    "w": 648,
+    "h": 900,
+    "coverage": 0.526,
+    "ok": true
+  },
+  "air-jordan-1-retro-high-og-patent": {
+    "src": "/cutouts/air-jordan-1-retro-high-og-patent.webp",
+    "w": 697,
+    "h": 417,
+    "coverage": 0.522,
+    "ok": true
+  },
+  "air-jordan-4-retro-bred-reimagined": {
+    "src": "/cutouts/air-jordan-4-retro-bred-reimagined.webp",
+    "w": 475,
+    "h": 310,
+    "coverage": 0.483,
+    "ok": true
+  },
+  "louis-vuitton-lv-trainer-sneaker-calfskin-green-white": {
+    "src": "/cutouts/louis-vuitton-lv-trainer-sneaker-calfskin-green-white.webp",
+    "w": 509,
+    "h": 469,
+    "coverage": 0.45,
+    "ok": true
+  },
+  "louis-vuitton-keepall-bandouliere-50-monogram-eclipse": {
+    "src": "/cutouts/louis-vuitton-keepall-bandouliere-50-monogram-eclipse.webp",
+    "w": 416,
+    "h": 622,
+    "coverage": 0.699,
+    "ok": true
+  },
+  "new-balance-990v6-made-in-usa-core-grey": {
+    "src": "/cutouts/new-balance-990v6-made-in-usa-core-grey.webp",
+    "w": 541,
+    "h": 333,
+    "coverage": 0.458,
+    "ok": true
+  },
+  "new-balance-550-retro-basketball-white-green": {
+    "src": "/cutouts/new-balance-550-retro-basketball-white-green.webp",
+    "w": 572,
+    "h": 870,
+    "coverage": 0.329,
+    "ok": false
+  },
+  "nike-kobe-6-protro-reverse-grinch": {
+    "src": "/cutouts/nike-kobe-6-protro-reverse-grinch.webp",
+    "w": 509,
+    "h": 469,
+    "coverage": 0.45,
+    "ok": true
+  },
+  "nike-dunk-low-retro-panda-black-white": {
+    "src": "/cutouts/nike-dunk-low-retro-panda-black-white.webp",
+    "w": 689,
+    "h": 732,
+    "coverage": 0.393,
+    "ok": false
+  },
+  "omega-speedmaster-professional-moonwatch-master-chronometer": {
+    "src": "/cutouts/omega-speedmaster-professional-moonwatch-master-chronometer.webp",
+    "w": 235,
+    "h": 292,
+    "coverage": 0.648,
+    "ok": true
+  },
+  "omega-seamaster-diver-300m-co-axial-master-chronometer": {
+    "src": "/cutouts/omega-seamaster-diver-300m-co-axial-master-chronometer.webp",
+    "w": 563,
+    "h": 450,
+    "coverage": 0.387,
+    "ok": false
+  },
+  "patek-philippe-nautilus-5711-1a-tiffany-blue": {
+    "src": "/cutouts/patek-philippe-nautilus-5711-1a-tiffany-blue.webp",
+    "w": 210,
+    "h": 308,
+    "coverage": 0.545,
+    "ok": true
+  },
+  "patek-philippe-nautilus-5980-1r-rose-gold": {
+    "src": "/cutouts/patek-philippe-nautilus-5980-1r-rose-gold.webp",
+    "w": 289,
+    "h": 330,
+    "coverage": 0.513,
+    "ok": true
+  },
+  "prada-re-nylon-gabardine-padded-jacket": {
+    "src": "/cutouts/prada-re-nylon-gabardine-padded-jacket.webp",
+    "w": 469,
+    "h": 467,
+    "coverage": 0.379,
+    "ok": true
+  },
+  "prada-monolith-brushed-leather-lug-boots-pouch": {
+    "src": "/cutouts/prada-monolith-brushed-leather-lug-boots-pouch.webp",
+    "w": 693,
+    "h": 900,
+    "coverage": 0.505,
+    "ok": true
+  },
+  "rimowa-original-cabin-anodised-aluminium-suitcase": {
+    "src": "/cutouts/rimowa-original-cabin-anodised-aluminium-suitcase.webp",
+    "w": 504,
+    "h": 900,
+    "coverage": 0.549,
+    "ok": true
+  },
+  "rimowa-classic-check-in-l-aluminium-trunk-suitcase": {
+    "src": "/cutouts/rimowa-classic-check-in-l-aluminium-trunk-suitcase.webp",
+    "w": 758,
+    "h": 533,
+    "coverage": 0.219,
+    "ok": false
+  },
+  "rolex-submariner-date-126610ln-oystersteel": {
+    "src": "/cutouts/rolex-submariner-date-126610ln-oystersteel.webp",
+    "w": 525,
+    "h": 395,
+    "coverage": 0.593,
+    "ok": true
+  },
+  "rolex-cosmograph-daytona-126500ln-panda": {
+    "src": "/cutouts/rolex-cosmograph-daytona-126500ln-panda.webp",
+    "w": 485,
+    "h": 466,
+    "coverage": 0.412,
+    "ok": true
+  },
+  "sony-playstation-5-pro-console-2tb-storage": {
+    "src": "/cutouts/sony-playstation-5-pro-console-2tb-storage.webp",
+    "w": 371,
+    "h": 513,
+    "coverage": 0.222,
+    "ok": false
+  },
+  "sony-wh-1000xm5-wireless-noise-cancelling-headphones": {
+    "src": "/cutouts/sony-wh-1000xm5-wireless-noise-cancelling-headphones.webp",
+    "w": 334,
+    "h": 347,
+    "coverage": 0.526,
+    "ok": true
+  },
+  "tom-ford-tobacco-vanille-eau-de-parfum-100ml": {
+    "src": "/cutouts/tom-ford-tobacco-vanille-eau-de-parfum-100ml.webp",
+    "w": 800,
+    "h": 572,
+    "coverage": 0.605,
+    "ok": true
+  },
+  "tom-ford-oud-wood-eau-de-parfum-100ml": {
+    "src": "/cutouts/tom-ford-oud-wood-eau-de-parfum-100ml.webp",
+    "w": 544,
+    "h": 511,
+    "coverage": 0.578,
+    "ok": false
+  }
+}

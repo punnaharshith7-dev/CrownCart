@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { preloadVenom, venomTransition } from "./venom";
 
 export type ThemePref = "light" | "dark" | "system";
 export type MotionPref = "full" | "reduced";
@@ -46,8 +47,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const resolved = theme === "system" ? (dark ? "dark" : "light") : theme;
 
   useEffect(() => {
+    preloadVenom();
+  }, []);
+
+  useEffect(() => {
     const root = document.documentElement;
-    root.classList.add("theme-transition");
+    // The venom snapshots the finished new theme, so skip the colour fade while it plays.
+    const fade = !root.classList.contains("venom-active");
+    if (fade) root.classList.add("theme-transition");
     root.dataset.theme = resolved;
     root.dataset.motion = motion;
     root.style.colorScheme = resolved;
@@ -56,7 +63,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [resolved, motion]);
 
   const setTheme = (t: ThemePref) => {
-    setThemeState(t);
+    const next = t === "system" ? (dark ? "dark" : "light") : t;
+    const apply = () => {
+      // Write the theme straight onto <html> too, so the view-transition snapshot already has it.
+      document.documentElement.dataset.theme = next;
+      document.documentElement.style.colorScheme = next;
+      setThemeState(t);
+    };
+    // A visible light/dark flip plays the venom; same-look changes (e.g. dark → system-dark) just apply.
+    if (next !== resolved && motion !== "reduced") venomTransition(next, apply);
+    else apply();
     write("cc-theme", t);
     // Mirror to the account so the choice follows the user across devices.
     fetch("/api/account/preferences", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: t }) }).catch(() => {});

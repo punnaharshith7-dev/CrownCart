@@ -1,3 +1,4 @@
+import { pincodeStateError } from "../../src/lib/pincodes.ts";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../context.ts";
@@ -164,6 +165,8 @@ export const checkoutRoutes = new Hono<AppEnv>()
 
       const addr = db.get("SELECT * FROM addresses WHERE id = ? AND user_id = ?", [input.addressId, u.id]);
       if (!addr) throw notFound("Address not found.");
+      const pinErr = pincodeStateError(addr.pincode, addr.state);
+      if (pinErr) throw badRequest(`${pinErr} Edit this address before ordering.`);
       if (!isServiceable(db, addr.pincode)) throw conflict(`We don't deliver to ${addr.pincode} yet.`);
 
       const payWindow = getSetting(db, "checkout").paymentWindowMinutes;

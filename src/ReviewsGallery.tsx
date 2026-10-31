@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { useEffect, useRef, useState } from "react";
 import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
+import { Link } from "react-router-dom";
 import {
   useCursor,
   MeshReflectorMaterial,
@@ -10,6 +11,8 @@ import {
 } from "@react-three/drei";
 import { easing } from "maath";
 import adamsbridgeHdr from "./adamsbridge.hdr?url";
+import { homepageWordmarkStyle } from "./lib/brandStyles";
+import { pageScrollBehavior } from "./lib/scroll";
 
 const GOLDENRATIO = 1.61803398875;
 
@@ -263,6 +266,7 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
 
   return (
     <div
+      className="reviews-gallery"
       style={{
         position: "fixed",
         inset: 0,
@@ -276,6 +280,7 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
       <Canvas
         dpr={[1, 1.5]}
         camera={{ fov: 70, position: [0, 2, 15] }}
+        className="reviews-gallery__canvas"
         style={{ width: "100vw", height: "100vh" }}
       >
         <color attach="background" args={["#191920"]} />
@@ -312,6 +317,7 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
 
       {/* Top Header Bar */}
       <div
+        className="reviews-gallery__header"
         style={{
           position: "absolute",
           top: 0,
@@ -326,24 +332,32 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
         }}
       >
         <div>
-          <div
+          <Link
+            to="/"
+            aria-label="CrownCart home"
+            onClick={() => {
+              onClose();
+              window.scrollTo({ top: 0, behavior: pageScrollBehavior() });
+            }}
             style={{
-              fontFamily: "'Antonio', sans-serif",
-              fontSize: 32,
-              fontWeight: 700,
+              ...homepageWordmarkStyle,
               color: "#ffffff",
-              letterSpacing: -1.5,
-              textTransform: "uppercase",
+              display: "inline-block",
+              paddingRight: 0,
+              textDecoration: "none",
+              cursor: "pointer",
+              pointerEvents: "all",
             }}
           >
             CrownCart
-          </div>
+          </Link>
           <div
             style={{
+              fontFamily: "'Inter var', sans-serif",
               fontSize: 12,
+              lineHeight: "1.5em",
               color: "#aaaaaa",
-              letterSpacing: 1.5,
-              textTransform: "uppercase",
+              letterSpacing: 0,
               marginTop: 2,
             }}
           >
@@ -417,6 +431,7 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
 
       {/* Reviewer Quick Navigation Pills at Bottom */}
       <div
+        className="reviews-gallery__quick-nav no-scrollbar"
         style={{
           position: "absolute",
           bottom: 24,
@@ -430,7 +445,6 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
           pointerEvents: "all",
           zIndex: 215,
         }}
-        className="no-scrollbar"
       >
         <button
           type="button"
@@ -491,6 +505,7 @@ export function ReviewsGallery({ onClose }: { onClose: () => void }) {
       {/* Zoomed-in Active Review Detail Card */}
       {activeReview && (
         <div
+          className="reviews-gallery__detail"
           style={{
             position: "absolute",
             bottom: 24,

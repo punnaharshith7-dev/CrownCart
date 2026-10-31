@@ -18,7 +18,7 @@ function safePath(raw: string | undefined) {
 }
 
 /** The origin the browser is using. In production this is fixed by PUBLIC_URL. */
-function origin(c: Ctx) {
+export function origin(c: Ctx) {
   if (config.isProd) return config.publicUrl.replace(/\/$/, "");
   const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "localhost:5173";
   const proto = c.req.header("x-forwarded-proto") ?? "http";
@@ -151,6 +151,7 @@ export const googleRoutes = new Hono<AppEnv>()
     if ("error" in result) return fail(c, result.error!);
 
     createSession(c, result.userId);
-    const dest = result.created && saved.returnTo === "/" ? "/account?welcome=1" : saved.returnTo;
+    // New accounts get the welcome page; everyone else goes through /signin, which opens their role's first page.
+    const dest = result.created && saved.returnTo === "/" ? "/account?welcome=1" : `/signin?returnTo=${encodeURIComponent(saved.returnTo)}`;
     return c.redirect(`${origin(c)}${dest}`);
   });
