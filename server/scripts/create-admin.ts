@@ -12,7 +12,7 @@ if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || password.length < 14) {
   console.error("Set INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD (14+ characters).");
   process.exit(1);
 }
-const db = new Db(config.databasePath);
+const db = new Db(config.databasePath, config.turso);
 db.migrate();
 ensureReferenceData(db);
 const hash = await hashPassword(password);

@@ -1,0 +1,47 @@
+# Two identical backends from this one repo, each with its own database and site address.
+# Values marked sync: false are entered in the Render dashboard, never committed.
+#
+# TRUST_PROXY: Vercel and Render sit in front of the API, so the visitor's address is in X-Forwarded-For.
+# SKIP_SEED: the imported data already has the catalog; seeding over the network would slow every start.
+# DATABASE_PATH: a replica of the Turso database. Losing it on restart is safe.
+services:
+  - type: web
+    name: crowncart-1
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node --disable-warning=ExperimentalWarning server/index.ts
+    healthCheckPath: /api/health
+    envVars:
+      - { key: NODE_VERSION, value: "24" }
+      - { key: NODE_ENV, value: production }
+      - { key: TRUST_PROXY, value: "1" }
+      - { key: SKIP_SEED, value: "1" }
+      - { key: DATABASE_PATH, value: /tmp/crowncart/replica.db }
+      - { key: TURSO_DATABASE_URL, sync: false }
+      - { key: TURSO_AUTH_TOKEN, sync: false }
+      - { key: PUBLIC_URL, sync: false }
+      - { key: APP_ORIGIN, sync: false }
+      - { key: CLOUDINARY_CLOUD_NAME, sync: false }
+      - { key: CLOUDINARY_API_KEY, sync: false }
+      - { key: CLOUDINARY_API_SECRET, sync: false }
+  - type: web
+    name: crowncart-2
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node --disable-warning=ExperimentalWarning server/index.ts
+    healthCheckPath: /api/health
+    envVars:
+      - { key: NODE_VERSION, value: "24" }
+      - { key: NODE_ENV, value: production }
+      - { key: TRUST_PROXY, value: "1" }
+      - { key: SKIP_SEED, value: "1" }
+      - { key: DATABASE_PATH, value: /tmp/crowncart/replica.db }
+      - { key: TURSO_DATABASE_URL, sync: false }
+      - { key: TURSO_AUTH_TOKEN, sync: false }
+      - { key: PUBLIC_URL, sync: false }
+      - { key: APP_ORIGIN, sync: false }
+      - { key: CLOUDINARY_CLOUD_NAME, sync: false }
+      - { key: CLOUDINARY_API_KEY, sync: false }
+      - { key: CLOUDINARY_API_SECRET, sync: false }

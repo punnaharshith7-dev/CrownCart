@@ -7,7 +7,7 @@ import type { AppEnv } from "../context.ts";
 import type { Db, Row } from "../db.ts";
 import { notFound, badRequest, forbidden } from "../lib/errors.ts";
 import { hasReceivedProduct, MAX_REVIEW_PHOTOS, reviewPhotos } from "../lib/reviews.ts";
-import { saveUpload } from "../lib/uploads.ts";
+import { savePublicUpload } from "../lib/uploads.ts";
 import { body, query } from "../lib/validate.ts";
 import { requireUser } from "../lib/auth.ts";
 import { getSetting } from "../lib/settings.ts";
@@ -490,9 +490,8 @@ export const catalogRoutes = new Hono<AppEnv>()
     for (const f of form.getAll("photos")) if (f instanceof File && f.size > 0) files.push(f);
     if (files.length > MAX_REVIEW_PHOTOS) throw badRequest(`You can add up to ${MAX_REVIEW_PHOTOS} photos.`);
     // Photos only (JPG, PNG, WebP), checked by their bytes.
-    const dir = join(config.publicUploadDir, "reviews");
     const photos: string[] = [];
-    for (const f of files) photos.push(`/uploads/reviews/${(await saveUpload(f, dir, ["image"])).name}`);
+    for (const f of files) photos.push((await savePublicUpload(f, "reviews", ["image"])).url);
     db.tx(() => {
       const reviewId = db.run("INSERT INTO reviews (product_id, user_id, rating, title, body, verified_purchase, status) VALUES (?, ?, ?, ?, ?, 1, 'published')", [
         p.id,

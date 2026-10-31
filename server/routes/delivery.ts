@@ -11,13 +11,10 @@ import { areaMatch, assignPartner, autoAssignWaitingFor, partnerTransition, save
 import { cancelAndRefund, startRefund } from "../lib/payments.ts";
 import { getSetting } from "../lib/settings.ts";
 import { audit } from "../lib/audit.ts";
-import { saveUpload } from "../lib/uploads.ts";
-import { config } from "../config.ts";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { deletePrivateUpload, readPrivateUpload, savePrivateUpload } from "../lib/uploads.ts";
 
 /** Private folder for delivery photos (doorstep and return-pickup photos). Never served publicly. */
-export const deliveryPhotoDir = () => join(config.privateStorageDir, "delivery-photos");
+const PHOTO_FOLDER = "delivery-photos";
 export const deliveryPhotoUrl = (name: string | null | undefined) => (name ? `/api/delivery/photos/${name}` : null);
 
 /** Only approved partners reach assignment data. */
@@ -295,18 +292,12 @@ export const deliveryRoutes = new Hono<AppEnv>()
     const db = c.get("db");
     const assignmentId = Number(c.req.param("id"));
     // Photos only (JPG, PNG, WebP), checked by their bytes; removed again if the step is refused.
-    const photo = photoFile ? (await saveUpload(photoFile, deliveryPhotoDir(), ["image"])).name : undefined;
+    const photo = photoFile ? (await savePrivateUpload(photoFile, PHOTO_FOLDER, ["image"])).name : undefined;
     let refundOrderId: number | null;
     try {
       ({ refundOrderId } = partnerTransition(db, assignmentId, u.id, { ...input, photo }));
     } catch (err) {
-      if (photo) {
-        try {
-          unlinkSync(join(deliveryPhotoDir(), photo));
-        } catch {
-          /* already gone */
-        }
-      }
+      if (photo) await deletePrivateUpload(PHOTO_FOLDER, photo);
       throw err;
     }
     audit(db, { actorId: u.id, action: `delivery.${input.to}`, entityType: "assignment", entityId: assignmentId, details: { reason: input.reason }, ip: c.get("ip") });
@@ -340,7 +331,7 @@ export const deliveryRoutes = new Hono<AppEnv>()
  * Serves a delivery photo to the people involved: the partner who took it, the customer whose
  * order it is, that store's staff, and platform admins. Everyone else gets "not found".
  */
-export const deliveryPhotoRoutes = new Hono<AppEnv>().get("/:name", (c) => {
+export const deliveryPhotoRoutes = new Hono<AppEnv>().get("/:name", async (c) => {
   const u = c.get("user");
   if (!u) throw notFound();
   const name = c.req.param("name");
@@ -359,10 +350,10 @@ export const deliveryPhotoRoutes = new Hono<AppEnv>().get("/:name", (c) => {
     u.roles.includes("platform_admin") ||
     Boolean(db.get("SELECT 1 FROM store_members WHERE store_id = ? AND user_id = ?", [row.store_id, u.id]));
   if (!allowed) throw notFound();
-  const path = join(deliveryPhotoDir(), name);
-  if (!existsSync(path)) throw notFound();
+  const photo = await readPrivateUpload(PHOTO_FOLDER, name);
+  if (!photo) throw notFound();
   const type = name.endsWith(".png") ? "image/png" : name.endsWith(".webp") ? "image/webp" : "image/jpeg";
-  return c.body(readFileSync(path), 200, { "Content-Type": type, "Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff" });
+  return c.body(new Uint8Array(photo), 200, { "Content-Type": type, "Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff" });
 });
 
 // Kept for symmetry with other portals; partners never cancel orders.

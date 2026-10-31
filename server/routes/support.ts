@@ -8,9 +8,7 @@ import { rateLimit } from "../lib/rate-limit.ts";
 import { emailAdmins, notifyMany } from "../lib/notify.ts";
 import { config } from "../config.ts";
 import { isAutoReplying, startItemChatAutoReply } from "./assistant.ts";
-import { saveUpload } from "../lib/uploads.ts";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readPrivateUpload, savePrivateUpload } from "../lib/uploads.ts";
 
 const CATEGORIES = ["order", "payment", "delivery", "returns", "product", "account", "general"] as const;
 
@@ -178,7 +176,7 @@ export const supportRoutes = new Hono<AppEnv>()
     if (file.size > 8 << 20) throw badRequest("Photo is too large (max 8 MB).");
     const caption = String(form!.get("caption") ?? "").trim().slice(0, 1000);
     // Only images pass: the file's own bytes are checked, never its name or claimed type.
-    const saved = await saveUpload(file, photoDir(), ["image"]);
+    const saved = await savePrivateUpload(file, PHOTO_FOLDER, ["image"]);
     db.tx(() => {
       db.run("INSERT INTO ticket_messages (ticket_id, author_user_id, body, photo) VALUES (?, ?, ?, ?)", [t.id, u.id, caption ? `📷 ${caption}` : "📷 Photo", saved.name]);
       db.run("UPDATE support_tickets SET status = 'open', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?", [t.id]);
@@ -194,17 +192,17 @@ export const supportRoutes = new Hono<AppEnv>()
   })
 
   /** Serves a chat photo to the customer who sent it, or to support admins. Never public. */
-  .get("/photos/:name", (c) => {
+  .get("/photos/:name", async (c) => {
     const u = requireUser(c);
     const name = c.req.param("name");
     if (!/^[a-z0-9]+-[A-Za-z0-9_-]+\.(jpg|png|webp)$/.test(name)) throw notFound();
     const db = c.get("db");
     const row = db.get("SELECT t.user_id FROM ticket_messages m JOIN support_tickets t ON t.id = m.ticket_id WHERE m.photo = ?", [name]);
     if (!row || (row.user_id !== u.id && !u.permissions.has("admin.support"))) throw notFound();
-    const path = join(photoDir(), name);
-    if (!existsSync(path)) throw notFound();
+    const photo = await readPrivateUpload(PHOTO_FOLDER, name);
+    if (!photo) throw notFound();
     const type = name.endsWith(".png") ? "image/png" : name.endsWith(".webp") ? "image/webp" : "image/jpeg";
-    return c.body(readFileSync(path), 200, { "Content-Type": type, "Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff" });
+    return c.body(new Uint8Array(photo), 200, { "Content-Type": type, "Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff" });
   });
 
-const photoDir = () => join(config.privateStorageDir, "support-photos");
+const PHOTO_FOLDER = "support-photos";

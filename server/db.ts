@@ -1,4 +1,4 @@
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import Database from "libsql";
 import { readdirSync, readFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,39 +6,60 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 
 export type Row = Record<string, any>;
-type Params = Record<string, SQLInputValue> | SQLInputValue[];
+type SQLValue = string | number | bigint | null;
+type Params = Record<string, SQLValue> | SQLValue[];
+
+export type RemoteOptions = { syncUrl: string; authToken: string };
+
+/** libsql aborts the whole process on values it cannot bind, so they are refused here with a normal error. */
+function assertBindable(value: unknown) {
+  const type = typeof value;
+  if (value === null || type === "string" || type === "number" || type === "bigint") return;
+  throw new TypeError(`Provided value cannot be bound to a SQL parameter (${value === undefined ? "undefined" : type}).`);
+}
 
 /**
- * Thin wrapper over node:sqlite. All access is synchronous, so a transaction
- * that contains no `await` cannot interleave with another request — this is
- * what makes stock reservation and order creation concurrency-safe.
+ * Thin wrapper over libsql. All access is synchronous, so a transaction that
+ * contains no `await` cannot interleave with another request — this is what
+ * makes stock reservation and order creation concurrency-safe. That holds for
+ * one server process per database, which is how CrownCart is deployed.
+ *
+ * With `remote` set, the file at `path` is a replica of a hosted Turso database:
+ * reads are local, writes go to Turso, and the file can be lost safely because
+ * it is downloaded again on startup.
  */
 export class Db {
-  readonly raw: DatabaseSync;
+  readonly raw: InstanceType<typeof Database>;
   private depth = 0;
 
-  constructor(path: string) {
+  constructor(path: string, remote?: RemoteOptions | null) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-    this.raw = new DatabaseSync(path);
+    this.raw = remote ? new Database(path, remote) : new Database(path);
+    if (remote) this.raw.sync();
     this.raw.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
-    if (path !== ":memory:") this.raw.exec("PRAGMA journal_mode = WAL;");
+    if (path !== ":memory:" && !remote) this.raw.exec("PRAGMA journal_mode = WAL;");
   }
 
-  private bind(params?: Params): SQLInputValue[] | [Record<string, SQLInputValue>] {
+  /** Always one argument: libsql rejects a bare null passed as the first positional value. */
+  private bind(params?: Params): [] | [Params] {
     if (params === undefined) return [];
-    return Array.isArray(params) ? params : [params];
+    (Array.isArray(params) ? params : Object.values(params)).forEach(assertBindable);
+    return [params];
   }
 
   get<T = Row>(sql: string, params?: Params): T | undefined {
-    return this.raw.prepare(sql).get(...(this.bind(params) as SQLInputValue[])) as T | undefined;
+    const row = this.raw.prepare(sql).get(...this.bind(params)) as (Row & { _metadata?: unknown }) | undefined;
+    // libsql adds timing data to single-row results; callers spread rows into API responses.
+    if (row) delete row._metadata;
+    return row as T | undefined;
   }
 
   all<T = Row>(sql: string, params?: Params): T[] {
-    return this.raw.prepare(sql).all(...(this.bind(params) as SQLInputValue[])) as T[];
+    return this.raw.prepare(sql).all(...this.bind(params)) as T[];
   }
 
   run(sql: string, params?: Params): { changes: number; lastId: number } {
-    const r = this.raw.prepare(sql).run(...(this.bind(params) as SQLInputValue[]));
+    const r = this.raw.prepare(sql).run(...this.bind(params));
     return { changes: Number(r.changes), lastId: Number(r.lastInsertRowid) };
   }
 

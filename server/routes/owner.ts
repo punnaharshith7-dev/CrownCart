@@ -13,7 +13,7 @@ import { parseRange, reportData, salesMetrics, toCsv } from "../lib/analytics.ts
 import { ORDER_STATUS_LABELS, restockVariant, transitionOrder, type OrderStatus } from "../lib/orders.ts";
 import { cancelAndRefund, startRefund } from "../lib/payments.ts";
 import { approvedPartners, assignPartner, autoAssignShipment, createReturnPickup, createShipment } from "../lib/fulfilment.ts";
-import { saveUpload } from "../lib/uploads.ts";
+import { savePublicUpload } from "../lib/uploads.ts";
 import { splitRefund } from "../lib/credits.ts";
 import { randomToken, sha256 } from "../lib/crypto.ts";
 import { MEMBER_ROLES } from "../lib/permissions.ts";
@@ -384,11 +384,11 @@ export const ownerRoutes = new Hono<AppEnv>()
     if (!(file instanceof File)) throw badRequest("Attach a file.");
     const requestedKind = String(form!.get("kind") ?? "image");
     const alt = String(form!.get("alt") ?? "").slice(0, 200);
-    const saved = await saveUpload(file, config.publicUploadDir, ["image", "video", "model"]);
+    const saved = await savePublicUpload(file, "", ["image", "video", "model"]);
     const kind = saved.kind === "image" ? (requestedKind === "hero" ? "hero" : requestedKind === "poster" ? "poster" : "image") : saved.kind;
     const mediaId = db.run(
       "INSERT INTO product_media (product_id, kind, url, alt, sort_order) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order),0)+1 FROM product_media WHERE product_id = ?))",
-      [p.id, kind, `/uploads/${saved.name}`, alt || p.name, p.id],
+      [p.id, kind, saved.url, alt || p.name, p.id],
     ).lastId;
     audit(db, { actorId: u.id, action: "media.uploaded", entityType: "product_media", entityId: mediaId, storeId, details: { kind, productId: p.id } });
     return c.json({ product: productAdminView(db, p.id) }, 201);

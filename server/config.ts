@@ -16,6 +16,15 @@ export const config = {
   port: Number(env.PORT ?? 8787),
   rootDir: root,
   databasePath: env.DATABASE_PATH ?? join(root, "server", "data", "crowncart.db"),
+  // Hosted Turso database. When set, databasePath is only a local replica that can be lost safely.
+  turso: env.TURSO_DATABASE_URL ? { syncUrl: env.TURSO_DATABASE_URL, authToken: env.TURSO_AUTH_TOKEN ?? "" } : null,
+  // Skips the startup catalog seed, which is slow over the network and not needed once data is imported.
+  skipSeed: env.SKIP_SEED === "1",
+  cloudinary: {
+    cloudName: env.CLOUDINARY_CLOUD_NAME ?? "",
+    apiKey: env.CLOUDINARY_API_KEY ?? "",
+    apiSecret: env.CLOUDINARY_API_SECRET ?? "",
+  },
   privateStorageDir: env.PRIVATE_STORAGE_DIR ?? join(root, "server", "storage", "private"),
   publicUploadDir: env.PUBLIC_UPLOAD_DIR ?? join(root, "public", "uploads"),
   // Origins allowed to make state-changing requests (CSRF defence).

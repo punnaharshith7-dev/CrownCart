@@ -43,3 +43,6 @@ desktop.ini
 make_shoe_test.cjs
 test_shoe_compare.cjs
 public/test_shoe_*
+
+# Local Vercel build output
+.vercel/

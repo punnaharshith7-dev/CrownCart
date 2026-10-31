@@ -8,11 +8,14 @@ import { createApp } from "./app.ts";
 import { ensureReferenceData, seedCatalog } from "./seed.ts";
 import { expireStaleCheckouts } from "./lib/orders.ts";
 
-const db = new Db(config.databasePath);
+const db = new Db(config.databasePath, config.turso);
 const ran = db.migrate();
 if (ran.length) console.log(`[db] applied migrations: ${ran.join(", ")}`);
-ensureReferenceData(db);
-seedCatalog(db);
+if (!config.skipSeed) {
+  ensureReferenceData(db);
+  seedCatalog(db);
+}
+if (config.isProd && !config.cloudinary.cloudName) console.warn("[uploads] Cloudinary is not set: uploads go to local disk, which many hosts wipe on restart.");
 
 const app = createApp(db);
 

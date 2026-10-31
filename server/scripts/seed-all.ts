@@ -2,7 +2,7 @@ import { config } from "../config.ts";
 import { Db } from "../db.ts";
 import { ensureReferenceData, seedCatalog } from "../seed.ts";
 
-const db = new Db(config.databasePath);
+const db = new Db(config.databasePath, config.turso);
 db.migrate();
 ensureReferenceData(db);
 seedCatalog(db);
