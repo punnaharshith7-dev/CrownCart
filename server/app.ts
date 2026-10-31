@@ -58,7 +58,9 @@ export function createApp(db: Db) {
         fontSrc: ["'self'", "https://fonts.gstatic.com", "https://rsms.me"],
         imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com", "https:"],
         mediaSrc: ["'self'", "https://res.cloudinary.com"],
-        connectSrc: ["'self'", "https://api.razorpay.com", "https://lumberjack.razorpay.com", "https://res.cloudinary.com"],
+        // gstatic, githack and jsdelivr serve the 3D decoder and lighting files. blob and data carry textures inside models.
+        connectSrc: ["'self'", "blob:", "data:", "https://api.razorpay.com", "https://lumberjack.razorpay.com", "https://res.cloudinary.com", "https://www.gstatic.com", "https://raw.githack.com", "https://cdn.jsdelivr.net"],
+        workerSrc: ["'self'", "blob:"],
         frameSrc: ["https://api.razorpay.com", "https://checkout.razorpay.com"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
