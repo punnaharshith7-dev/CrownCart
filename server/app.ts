@@ -52,7 +52,8 @@ export function createApp(db: Db) {
     secureHeaders({
       contentSecurityPolicy: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "https://checkout.razorpay.com"],
+        // wasm-unsafe-eval: the 3D physics on the sign-in page runs on WebAssembly. It does not allow eval().
+        scriptSrc: ["'self'", "'wasm-unsafe-eval'", "https://checkout.razorpay.com"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://rsms.me"],
         fontSrc: ["'self'", "https://fonts.gstatic.com", "https://rsms.me"],
         imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com", "https:"],

@@ -19,7 +19,8 @@ cpSync("dist", ".vercel/output/static", { recursive: true });
 // The same policy as server/app.ts, because here the pages do not pass through the API.
 const csp = [
   "default-src 'self'",
-  "script-src 'self' https://checkout.razorpay.com",
+  // wasm-unsafe-eval: the 3D physics on the sign-in page runs on WebAssembly. It does not allow eval().
+  "script-src 'self' 'wasm-unsafe-eval' https://checkout.razorpay.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://rsms.me",
   "font-src 'self' https://fonts.gstatic.com https://rsms.me",
   "img-src 'self' data: blob: https://images.unsplash.com https:",
