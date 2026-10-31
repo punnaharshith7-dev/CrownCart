@@ -9,6 +9,7 @@ services:
     name: crowncart-1
     runtime: node
     plan: free
+    region: singapore
     buildCommand: npm ci --omit=dev
     startCommand: node --disable-warning=ExperimentalWarning server/index.ts
     healthCheckPath: /api/health
@@ -29,6 +30,7 @@ services:
     name: crowncart-2
     runtime: node
     plan: free
+    region: singapore
     buildCommand: npm ci --omit=dev
     startCommand: node --disable-warning=ExperimentalWarning server/index.ts
     healthCheckPath: /api/health
