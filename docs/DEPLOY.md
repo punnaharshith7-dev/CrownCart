@@ -43,7 +43,9 @@ Pass the `libsql://` URL of that copy as the last argument.
 
 New > Blueprint, pick this repo and branch. For each service enter the Turso and Cloudinary values of that copy. For now set `PUBLIC_URL` and `APP_ORIGIN` to `https://<vercel project name>.vercel.app`.
 
-Also add any integrations in use from your local `.env`: `RAZORPAY_*`, `EMAIL_PROVIDER`, `EMAIL_FROM`, `ADMIN_EMAIL`, `SMTP_*`, `RESEND_API_KEY`, `GOOGLE_*`, `MICROSOFT_*`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `SMS_PROVIDER`, `TEXTBEE_*`, `TWILIO_*`, `SHIPROCKET_*`.
+Render's free plan blocks the SMTP ports, so `EMAIL_PROVIDER=smtp` cannot send from there. Use `EMAIL_PROVIDER=brevo` with `BREVO_API_KEY`, and set `EMAIL_FROM` to a sender verified in Brevo.
+
+Also add any integrations in use from your local `.env`: `RAZORPAY_*`, `EMAIL_PROVIDER`, `EMAIL_FROM`, `ADMIN_EMAIL`, `BREVO_API_KEY`, `RESEND_API_KEY`, `GOOGLE_*`, `MICROSOFT_*`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `SMS_PROVIDER`, `TEXTBEE_*`, `TWILIO_*`, `SHIPROCKET_*`.
 
 ## 4. Vercel
 

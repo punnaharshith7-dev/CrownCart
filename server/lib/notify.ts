@@ -19,6 +19,26 @@ function smtpFrom() {
   return from.toLowerCase().includes(config.email.smtpUser.toLowerCase()) ? from : `CrownCart <${config.email.smtpUser}>`;
 }
 
+/** Brevo needs an HTML body and a structured sender, so plain text is escaped and "Name <address>" is split. */
+async function sendWithBrevo(to: string, subject: string, body: string, replyTo?: string) {
+  const match = config.email.from.match(/^\s*(.*?)\s*<(.+)>\s*$/);
+  const sender = match ? { name: match[1] || "CrownCart", email: match[2] } : { name: "CrownCart", email: config.email.from.trim() };
+  const escaped = body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: { "api-key": config.email.brevoApiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sender,
+      to: [{ email: to }],
+      subject,
+      textContent: body,
+      htmlContent: `<div style="white-space:pre-wrap">${escaped}</div>`,
+      ...(replyTo ? { replyTo: { email: replyTo } } : {}),
+    }),
+  });
+  if (!res.ok) throw new Error(`Brevo responded ${res.status}: ${await res.text()}`);
+}
+
 export interface NotificationInput {
   type: string;
   title: string;
@@ -63,6 +83,11 @@ export function sendEmail(db: Db, to: string, subject: string, body: string, opt
     const row = db.get("SELECT id FROM email_outbox WHERE id = ?", [lastId]);
     if (!row) return; // the enclosing transaction rolled back
     try {
+      if (config.email.provider === "brevo") {
+        await sendWithBrevo(to, subject, body, opts.replyTo);
+        db.run("UPDATE email_outbox SET status = 'sent' WHERE id = ?", [lastId]);
+        return;
+      }
       if (config.email.provider === "smtp") {
         await smtpTransport().sendMail({ from: smtpFrom(), to, subject, text: body, replyTo: opts.replyTo });
         db.run("UPDATE email_outbox SET status = 'sent' WHERE id = ?", [lastId]);

@@ -39,8 +39,10 @@ export const config = {
     webhookSecret: env.RAZORPAY_WEBHOOK_SECRET ?? "",
   },
   email: {
-    provider: (env.EMAIL_PROVIDER ?? "none") as "none" | "resend" | "smtp",
+    provider: (env.EMAIL_PROVIDER ?? "none") as "none" | "resend" | "smtp" | "brevo",
     resendApiKey: env.RESEND_API_KEY ?? "",
+    // Sends over HTTPS, so it works on Render's free plan, which blocks the SMTP ports.
+    brevoApiKey: env.BREVO_API_KEY ?? "",
     // SMTP, e.g. a Gmail account with an app password (smtp.gmail.com:465).
     smtpHost: env.SMTP_HOST ?? "smtp.gmail.com",
     smtpPort: Number(env.SMTP_PORT ?? 465),
@@ -95,6 +97,7 @@ export const integrations = () => ({
   razorpayWebhook: Boolean(config.razorpay.webhookSecret),
   email:
     (config.email.provider === "resend" && Boolean(config.email.resendApiKey)) ||
+    (config.email.provider === "brevo" && Boolean(config.email.brevoApiKey)) ||
     (config.email.provider === "smtp" && Boolean(config.email.smtpUser && config.email.smtpPass)),
   google: Boolean(config.google.clientId && config.google.clientSecret),
   microsoft: Boolean(config.microsoft.clientId && config.microsoft.clientSecret),
