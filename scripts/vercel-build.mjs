@@ -10,7 +10,7 @@ if (!/^https:\/\/[^/]+$/.test(api)) {
   process.exit(1);
 }
 
-execSync("npx vite build", { stdio: "inherit" });
+execSync("npx vite build", { stdio: "inherit", env: { ...process.env, VITE_API_ORIGIN: api } });
 
 rmSync(".vercel/output", { recursive: true, force: true });
 mkdirSync(".vercel/output", { recursive: true });
@@ -26,7 +26,7 @@ const csp = [
   "img-src 'self' data: blob: https://images.unsplash.com https:",
   "media-src 'self' https://res.cloudinary.com",
   // gstatic, githack and jsdelivr serve the 3D decoder and lighting files. blob and data carry textures inside models.
-  "connect-src 'self' blob: data: https://api.razorpay.com https://lumberjack.razorpay.com https://res.cloudinary.com https://www.gstatic.com https://raw.githack.com https://cdn.jsdelivr.net",
+  `connect-src 'self' ${api} blob: data: https://api.razorpay.com https://lumberjack.razorpay.com https://res.cloudinary.com https://www.gstatic.com https://raw.githack.com https://cdn.jsdelivr.net`,
   "worker-src 'self' blob:",
   "frame-src https://api.razorpay.com https://checkout.razorpay.com",
   "object-src 'none'",

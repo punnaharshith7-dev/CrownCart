@@ -16,15 +16,40 @@ export class ApiError extends Error {
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+/** How long a read keeps retrying while the free backend wakes from sleep (a cold start takes up to a minute). */
+const WAKE_WAIT_MS = 90_000;
+const WAKE_RETRY_MS = 3_000;
+const isAsleep = (status: number) => status === 502 || status === 503 || status === 504;
+
+let wakePing: Promise<unknown> | null = null;
+/** Calls the backend directly, not through the Vercel proxy, because the proxy answers 502 while it sleeps. */
+function wakeBackend() {
+  const origin = import.meta.env.VITE_API_ORIGIN as string | undefined;
+  if (!origin || wakePing) return;
+  wakePing = fetch(`${origin}/api/health`, { mode: "no-cors" })
+    .catch(() => undefined)
+    .finally(() => {
+      wakePing = null;
+    });
+}
+
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
   let res: Response;
+  const deadline = Date.now() + WAKE_WAIT_MS;
   try {
-    res = await fetch(`/api${path}`, {
-      method,
-      credentials: "same-origin",
-      headers: body instanceof FormData ? {} : body !== undefined ? { "Content-Type": "application/json" } : {},
-      body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    for (;;) {
+      res = await fetch(`/api${path}`, {
+        method,
+        credentials: "same-origin",
+        headers: body instanceof FormData ? {} : body !== undefined ? { "Content-Type": "application/json" } : {},
+        body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      if (!isAsleep(res.status)) break;
+      wakeBackend();
+      // Only reads are retried: a write must never risk running twice.
+      if (method !== "GET" || Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, WAKE_RETRY_MS));
+    }
   } catch {
     throw new ApiError(0, "network", "You appear to be offline. Check your connection and try again.");
   }
