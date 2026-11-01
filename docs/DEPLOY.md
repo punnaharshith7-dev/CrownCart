@@ -1,4 +1,10 @@
-# Deploying CrownCart (two copies, free plans)
+# Deploying CrownCart (free plans)
+
+**Current setup: one store on two addresses.** Both Vercel projects send their API requests to one backend, `crowncart-2` on Render, which uses the `crowncart-2` Turso database. `APP_ORIGIN` on that backend lists both addresses and `PUBLIC_URL` is `https://crowncart-2.vercel.app`. The `crowncart-1` Render service is suspended and its Turso database is an old backup. Never run two backends on one database, because order and stock safety relies on a single backend.
+
+Outside services therefore need `crowncart-2`'s webhooks only, while Google and Microsoft sign-in need the callback address of both sites.
+
+The steps below describe how two fully separate copies were first set up, and still apply when setting up a new one.
 
 Each copy has its own frontend, backend and database. They start with the same data and then run separately.
 
