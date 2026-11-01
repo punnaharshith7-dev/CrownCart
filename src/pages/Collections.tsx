@@ -1,4 +1,4 @@
-import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import { Component, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as THREE from "three";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
@@ -10,6 +10,7 @@ import { SiteHeader } from "../components/SiteHeader";
 import { inr } from "../lib/format";
 import { useTheme } from "../lib/theme";
 import { useApi, useTitle } from "../lib/useApi";
+import dawnHdr from "../kiara_1_dawn_1k.hdr?url";
 
 interface Brand {
   name: string;
@@ -35,6 +36,17 @@ function webglAvailable() {
     return Boolean(c.getContext("webgl2") || c.getContext("webgl"));
   } catch {
     return false;
+  }
+}
+
+/** If the 3D scene fails (a texture or lighting file will not load), show the fallback instead of blanking the whole page. */
+class SceneBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
   }
 }
 
@@ -71,7 +83,9 @@ export default function Collections() {
       <SiteHeader />
       <main id="main" className="cl-stage">
         {webgl && slots.length > 0 ? (
-          <Scene slots={slots} onHover={setActive} onOpen={openBrand} />
+          <SceneBoundary fallback={<FallbackGrid brands={featured} />}>
+            <Scene slots={slots} onHover={setActive} onOpen={openBrand} />
+          </SceneBoundary>
         ) : (
           <FallbackGrid brands={featured} />
         )}
@@ -133,7 +147,7 @@ const Scene = memo(function Scene({ slots, onHover, onOpen }: { slots: Slot[]; o
           </Rig>
           <Banner position={BANNER_POSITION} />
         </ScrollControls>
-        <Environment preset="dawn" background blur={0.5} />
+        <Environment files={dawnHdr} background blur={0.5} />
       </Suspense>
     </Canvas>
   );
