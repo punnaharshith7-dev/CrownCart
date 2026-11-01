@@ -8,6 +8,7 @@ import { createSession } from "../lib/auth.ts";
 import { audit } from "../lib/audit.ts";
 import { rateLimit } from "../lib/rate-limit.ts";
 import { grantRole } from "./auth.ts";
+import { origin } from "./google.ts";
 
 const STATE_COOKIE = "cc_microsoft_oauth";
 const AUTHORITY = "https://login.microsoftonline.com/common/oauth2/v2.0";
@@ -16,14 +17,6 @@ const AUTHORITY = "https://login.microsoftonline.com/common/oauth2/v2.0";
 function safePath(raw: string | undefined) {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) return "/";
   return raw;
-}
-
-/** The origin the browser is using. In production this is fixed by PUBLIC_URL. */
-function origin(c: Ctx) {
-  if (config.isProd) return config.publicUrl.replace(/\/$/, "");
-  const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "localhost:5173";
-  const proto = c.req.header("x-forwarded-proto") ?? "http";
-  return `${proto}://${host}`;
 }
 
 const redirectUri = (c: Ctx) => `${origin(c)}/api/auth/microsoft/callback`;

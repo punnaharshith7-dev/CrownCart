@@ -17,9 +17,15 @@ function safePath(raw: string | undefined) {
   return raw;
 }
 
-/** The origin the browser is using. In production this is fixed by PUBLIC_URL. */
+/**
+ * The origin the browser is using. In production the store can have several addresses, so the
+ * forwarded host is honoured only when it is listed in APP_ORIGIN; anything else gets PUBLIC_URL.
+ */
 export function origin(c: Ctx) {
-  if (config.isProd) return config.publicUrl.replace(/\/$/, "");
+  if (config.isProd) {
+    const forwarded = `https://${c.req.header("x-forwarded-host")?.split(",")[0].trim()}`;
+    return config.appOrigins.includes(forwarded) ? forwarded : config.publicUrl.replace(/\/$/, "");
+  }
   const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "localhost:5173";
   const proto = c.req.header("x-forwarded-proto") ?? "http";
   return `${proto}://${host}`;
